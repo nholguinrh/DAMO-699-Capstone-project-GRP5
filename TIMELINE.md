@@ -30,13 +30,13 @@
 | Date | Task | Owner | Reviewer | Artifact / Issue |
 |------|------|-------|----------|------------------|
 | Mon Jul 06 | `[ ]` Attend capstone intro session; record supervisor name + meeting cadence in this file | All | — | — |
-| Mon Jul 06 | `[ ]` Commit scaffold (§6 structure), CLAUDE.md, issue/PR templates | Nelson | Lerneir | `scaffold` |
+| Mon Jul 06 | `[ ]` Commit scaffold (§6 structure), issue/PR templates |  |  | `scaffold` |
 | Mon Jul 06 | `[ ]` Each member brings ≥1 topic/dataset candidate to Tuesday debate (1-para pitch + data link) | All | — | `docs/topic-candidates.md` |
 | Tue Jul 07 | `[ ]` **Topic debate:** score ≥3 candidates against Problem Identification + Data Feasibility rubric criteria; decide by majority | All | — | `docs/topic-decision.md` |
 | Tue Jul 07 | `[ ]` Verify chosen dataset is actually downloadable + license permits redistribution (Student Guide: datasets in repo "when permitted") | Mitchel | Nelson | `data/README.md` stub |
-| Wed Jul 08 | `[ ]` Author `evaluation-criteria` skill (rubrics verbatim + grading procedure) | Lerneir | Mitchel | `.claude/skills/evaluation-criteria/` |
+| Wed Jul 08 | `[ ]` Author `evaluation-criteria` skill (rubrics verbatim + grading procedure) | Lerneir | Mitchel |  |
 | Wed Jul 08 | `[ ]` Watch academic-writing workshop + complete ungraded assessment (Student Guide Wk 1) | All | — | — |
-| Thu Jul 09 | `[ ]` Author `collaboration-workflow` skill; create Project board, milestones M1–M5, labels | Nelson | Lerneir | `.claude/skills/collaboration-workflow/` |
+| Thu Jul 09 | `[ ]` Author `collaboration-workflow` skill; create Project board, milestones M1–M5, labels |  |  | |
 | Thu Jul 09 | `[ ]` Draft `TEAM_CHARTER.md` (availability, review SLA 24h, escalation) | Mitchel | All | `TEAM_CHARTER.md` |
 | Fri Jul 10 | `[ ]` Open all 10 proposal-section issues (00–09) with owners, DoD, due dates from Week 2 rows | Nelson | — | issues |
 | Fri Jul 10 | `[ ]` Week-1 retro (15 min): confirm Week 2 assignments below still hold | All | — | meeting note |
@@ -101,7 +101,7 @@ Weekly rhythm (refine into daily rows at the start of each week):
 ## 9. Week 11 — Sep 14–18 · **M4 poster + M5 reflection Wed Sep 16**
 
 - `[ ]` Mon Sep 14: poster final PDF; **to printer** (≥2 business days before session; printer closed weekends — if session is Mon/Tue this collapses: confirm session date in Week 10 and shift printing into Week 10 accordingly) — Mitchel
-- `[ ]` Mon–Tue: Q&A rehearsal ×2, Claude as examiner; 5–7 min walkthrough each member — All
+- `[ ]` Mon–Tue: Q&A rehearsal ×2, 5–7 min walkthrough each member — All
 - `[ ]` **Wed Sep 16: Reflection paper due (M5, 20%)** — inputs harvested from meeting notes + PR history — Lerneir drafts, all contribute
 - `[ ]` Poster session day: arrive **30 min early** for setup (mandatory, graded) — All
 
