@@ -48,7 +48,6 @@ Specialized roles (lead, data, writing/QA) are assigned in the [Team Charter](./
 
 - **Python** — data preparation, analysis, and modeling (notebooks + reusable modules in `src/`).
 - **Power BI** — dashboards and visual communication of results.
-- **Claude Code** — AI-assisted authoring and review, governed by skill definitions in [`.claude/skills/`](./.claude/skills/) (each `SKILL.md` encodes how a deliverable is drafted, gated, and assembled).
 - **GitHub** — single source of truth for code, documents, and history.
 - **GitHub Projects** — Kanban board for the artifact backlog.
 - **GitHub Actions** — automated checks that gate every pull request.
@@ -84,9 +83,8 @@ This is how we work — read this before contributing.
 ├── data/               # raw/ and processed/ datasets (+ data dictionary & APA citation)
 ├── notebooks/          # 01_eda, 02_cleaning, 03_models, 04_diagnostics
 ├── src/                # Reusable Python modules imported by the notebooks
-├── .claude/skills/     # Claude Code skills: evaluation-criteria, capstone-proposal, …
+├── .agent/skills/      # Code skills: evaluation-criteria, capstone-proposal, …
 ├── docs/course/        # Official DAMO 699 course documents (source of truth)
-├── CLAUDE.md           # Working agreement + Definition of Done
 ├── TEAM_CHARTER.md     # Team social contract
 └── TIMELINE.md         # Schedule and milestones
 ```
