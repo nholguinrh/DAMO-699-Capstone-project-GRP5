@@ -13,12 +13,12 @@
 
 | # | Milestone | Due | Weight | Governing document |
 |---|-----------|-----|--------|--------------------|
-| M1 | Project Proposal | **Fri Jul 17** | 10% | Student Guide Wk 2; Instructions §II; Proposal Template (≤5 pp) |
+| M1 | Project Proposal | **Fri Jul 17** | 10% | Student Guide Wk 2; Instructions II; Proposal Template (≤5 pp) |
 | M1b | Proposal R&R (contingent) | Within **48h** of supervisor feedback (Wk 3) | — | Student Guide Wk 3 |
 | M2 | Preliminary analysis visible in repo | **Fri Aug 07** | supervisor review | Student Guide Wk 5 |
-| M3 | Final Report + Dataset + full repo | **Sun Sep 13** | **60%** | Student Guide Wk 10; Instructions §III |
-| M3b | Presentation deck submitted | **Wk 10 (by Sep 11)** | 10% (with discussion) | Presentation Strategies §Assessments |
-| M4 | Poster presentation (poster to printer ≥2 business days prior; printer closed weekends) | **Wk 11, Sep 14–18** — exact session date **TBD** | (part of 10%) | Poster Instructions §5 & printing note |
+| M3 | Final Report + Dataset + full repo | **Sun Sep 13** | **60%** | Student Guide Wk 10; Instructions III |
+| M3b | Presentation deck submitted | **Wk 10 (by Sep 11)** | 10% (with discussion) | Presentation Strategies Assessments |
+| M4 | Poster presentation (poster to printer ≥2 business days prior; printer closed weekends) | **Wk 11, Sep 14–18** — exact session date **TBD** | (part of 10%) | Poster Instructions 5 & printing note |
 | M5 | Reflection paper | **Wed Sep 16** | 20% | Student Guide Wk 11 |
 
 ---
@@ -30,7 +30,7 @@
 | Date | Task | Owner | Reviewer | Artifact / Issue |
 |------|------|-------|----------|------------------|
 | Mon Jul 06 | `[ ]` Attend capstone intro session; record supervisor name + meeting cadence in this file | All | — | — |
-| Mon Jul 06 | `[ ]` Commit scaffold (§6 structure), issue/PR templates |  |  | `scaffold` |
+| Mon Jul 06 | `[ ]` Commit scaffold (6 structure), issue/PR templates |  |  | `scaffold` |
 | Mon Jul 06 | `[ ]` Each member brings ≥1 topic/dataset candidate to Tuesday debate (1-para pitch + data link) | All | — | `docs/topic-candidates.md` |
 | Tue Jul 07 | `[ ]` **Topic debate:** score ≥3 candidates against Problem Identification + Data Feasibility rubric criteria; decide by majority | All | — | `docs/topic-decision.md` |
 | Tue Jul 07 | `[ ]` Verify chosen dataset is actually downloadable + license permits redistribution (Student Guide: datasets in repo "when permitted") | Mitchel | Nelson | `data/README.md` stub |
