@@ -35,8 +35,7 @@ grading, review, and revision stay independent.
 
 **Ownership load:** Nelson 3 sections (01,02,03) · Lerneir 2 (04,05) · Mitchel 3 (06,07,08) ·
 Giti 2 (00,09) — a 3-2-3-2 split, replacing the old 3-person 3-3-4 imbalance. Nobody reviews a
-section they own. Giti reviews three technically-dense sections (03, 05, 08) to get full context
-on the analytical thread early, since Giti is newest to the artifact structure.
+section they own. 
 
 Length budget for content sections (01–08) totals ~2,250 words / ~4.5 pages, leaving a buffer
 inside the 5-page cap (excl. cover + references). These are targets, not hard limits — the real
