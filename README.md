@@ -20,7 +20,7 @@ Working as a team of four data analytics consultants, we apply the complete data
 |---|---|---|
 | Mitchel | Contributor & reviewer (rotating) | [@MitchelP](https://github.com/MitchelP) |
 | Giti | Contributor & reviewer (rotating) | [@gitiabhilasa007](https://github.com/gitiabhilasa007) |
-| Lerneir | Contributor & reviewer (rotating) | _TBD_ |
+| Lerneir | Contributor & reviewer (rotating) | [@Lerneir](https://github.com/Lerneir |
 | Nelson | Contributor & reviewer (rotating) | [@nholguinrh](https://github.com/nholguinrh) |
 
 
