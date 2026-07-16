@@ -11,23 +11,12 @@ last_rubric_score: null
 
 ## 7. Project Plan and Timeline
 
-The project will follow the analytics lifecycle through a phased schedule aligned with the course milestones. During Weeks 1 and 
-2, the team will finalize the problem definition, analytical objective, data sources, methods, responsibilities, and proposal. 
-The completed proposal will be reviewed against the official rubric and submitted by July 17.
+The project will follow a phased analytics lifecycle aligned with the course milestones and the dependencies among data preparation, modeling, evaluation, and communication. During Weeks 1 and 2, the team will finalize the problem definition, analytical objective, proposed data sources, methodology, and ethical considerations. The principal deliverable from this phase will be the completed proposal, submitted by July 17.
 
-During Weeks 3 to 5, the team will acquire the Bank of Canada time series, document their provenance and variable definitions, 
-create the raw and processed data layers, and complete temporal alignment, missing-value assessment, exploratory analysis, 
-feature engineering, and a naïve forecasting baseline. Reproducible preliminary analysis will be available in GitHub by August 7
-for faculty review.
+Weeks 3 to 5 will focus on data readiness. The team will extract and document the required series from the Bank of Canada, FRED, and Statistics Canada; construct the Bronze, Silver, and Gold data layers; align publication and observation dates; assess missingness; and engineer the proposed yield-spread, volatility, momentum, and policy-shock features. Exploratory analysis, stationarity testing, and a naïve random-walk benchmark will provide the preliminary analytical deliverable expected in GitHub by August 7.
 
-During Weeks 6 to 8, the team will implement and compare ARIMA, VAR, and LSTM models using clearly defined forecast targets, 
-chronological data partitions, and consistent evaluation metrics. This phase will include stationarity testing, lag selection, 
-diagnostic checks, sensitivity analysis, and error interpretation. Findings and figures will be documented as results become 
-stable.
+During Weeks 6 to 8, the team will implement ARIMA, VAR, and LSTM models using chronological validation and common forecast horizons. Diagnostic testing, rolling-window evaluation, and comparison through RMSE, MAE, and the Diebold–Mariano test will support a model-selection decision based on predictive accuracy, interpretability, and robustness.
 
-During Weeks 9 and 10, the team will synthesize the findings, develop the Power BI dashboard, formulate recommendations and 
-limitations, and complete the final report, dataset package, repository, and presentation deck. The deck will be finalized by 
-September 11, and the final group submission by September 13. Poster preparation and rehearsal will follow in Week 11.
+Weeks 9 and 10 will be dedicated to final synthesis. The selected findings will inform the Power BI dashboard, practical recommendations, limitations, and final report. The presentation deck will be finalized by September 11, followed by submission of the report, dataset, and reproducible repository by September 13. Poster preparation and rehearsal will continue in Week 11.
 
-GitHub will serve as the project’s source of truth. Each artifact will use a dedicated branch, one owner, one reviewer, and a 
-pull request, and will be merged only after peer review, reproducibility checks, and an Excellent-band rubric score.
+Progress will be monitored through documented milestones, peer review, version control, and reproducibility checks to ensure that each phase produces an auditable deliverable before the subsequent stage begins.
