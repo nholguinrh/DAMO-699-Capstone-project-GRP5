@@ -24,7 +24,7 @@ The Bank of Canada's Valet API serves as the primary data source (Bank of Canada
 - **Benchmark Sovereign Bond Yields:** Government of Canada bond yields at 2-, 3-, 5-, 7-, 10-, and 30-year maturities (series group `BD.CDN.*.DQ.YLD`), enabling construction of the full term structure of interest rates.
 - **Foreign Exchange Rate:** Daily USD/CAD exchange rate observations (series `FX_RATES_DAILY`), capturing cross-border capital-flow dynamics that influence long-term yields.
 
-The resulting dataset comprises approximately 4,300 daily observations across nine variables. A known limitation involves missing values on weekends and Canadian statutory holidays, which the data-engineering pipeline addresses through forward-fill imputation (as detailed in Section 5).
+The resulting dataset comprises approximately 4,300 daily observations across nine variables. A known limitation involves missing values on weekends and Canadian statutory holidays, which the data-engineering pipeline addresses through forward-fill imputation (as detailed in Section 5). To mitigate the operational risk of API outages or schema changes — inherent to any public web service without a formal service-level agreement — the pipeline persists each extraction as a timestamped local JSON cache, enabling reproducible offline analysis.
 
 ### 4.2 Complementary Source: U.S. Federal Reserve — FRED API
 
@@ -32,7 +32,7 @@ The Federal Reserve Economic Data (FRED) API, maintained by the Federal Reserve 
 
 ### 4.3 Complementary Source: Statistics Canada — Consumer Price Index
 
-Statistics Canada's Web Data Service provides the monthly Consumer Price Index (CPI), all items, not seasonally adjusted (Table 18-10-0004-01, vector `v41690973`) (Statistics Canada, 2024). CPI captures domestic inflation expectations, a fundamental macroeconomic driver of the yield curve slope and a theoretically motivated input to the econometric model. This source is publicly accessible without authentication. The primary limitation is the monthly reporting frequency versus the daily frequency of the other two sources, which requires temporal aggregation or merge-asof alignment during feature engineering.
+Statistics Canada's Web Data Service provides the monthly Consumer Price Index (CPI), all items, not seasonally adjusted (Table 18-10-0004-01, vector `v41690973`) (Statistics Canada, 2024). CPI captures domestic inflation expectations, a fundamental macroeconomic driver of the yield curve slope and a theoretically motivated input to the econometric model. This source is publicly accessible without authentication. The primary limitation is the monthly reporting frequency versus the daily frequency of the other two sources, which requires temporal aggregation or merge-asof alignment during feature engineering. To prevent look-ahead bias, the merge key uses the Statistics Canada publication date — not the CPI reference month — ensuring that each trading day is paired only with inflation data that was publicly available at that point in time.
 
 ### 4.4 Dataset Summary
 
