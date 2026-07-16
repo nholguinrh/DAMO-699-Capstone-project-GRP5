@@ -11,13 +11,10 @@ last_rubric_score: null
 
 ## 8. Ethical Considerations
 
-The project will use publicly available, aggregate macro-financial time series and will not collect personal, confidential, or 
-identifiable information. Team members will complete the required TCPS 2 certification before undertaking project activities. 
-Data provenance, access conditions, transformations, and imputation decisions will be documented, and all sources will be 
-attributed in APA 7 format.
+### Data Governance and Compliance
 
-Analytical results will be communicated cautiously. Forecasts will be presented with uncertainty and model limitations, while 
-Granger-based findings will not be interpreted as proof of economic causation. The team will also assess potential bias 
-introduced by differing publication frequencies, missing observations, and changing market regimes. The dashboard will be framed 
-as an academic decision-support tool rather than financial advice, and users will be cautioned against applying its outputs 
-without additional professional judgment and validation.
+The project will use publicly available, aggregate macro-financial time series and will not collect personal, confidential, or identifiable information. Although it does not involve human participants, all team members will complete TCPS 2 certification as a standard UNF academic research requirement. Data provenance, access conditions, transformations, imputation procedures, and publication-date alignment will be documented. Sources will be attributed using APA 7 conventions, including the Bank of Canada’s Valet API (Bank of Canada, 2024).
+
+### Responsible Communication of Results
+
+Forecasts will be presented with uncertainty, validation results, and model limitations. Granger-based findings and SHAP explanations will not be interpreted as evidence of economic causation. Potential bias arising from missing observations, different publication frequencies, look-ahead risk, and structural market-regime changes will be assessed. The dashboard will be presented as an academic decision-support tool, not financial advice, and its outputs should not replace independent professional judgment and validation.
