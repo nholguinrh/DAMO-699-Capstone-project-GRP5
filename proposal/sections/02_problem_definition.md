@@ -1,6 +1,6 @@
 ## Problem Definition
 
-The Canadian fixed-income market depends on the timely interpretation of monetary policy, sovereign bond yields, and exchange-rate movements. However, these indicators are released on different schedules and at different frequencies, which makes them difficult to align and analyze consistently. As a result, yield-curve analysis is often fragmented, time-consuming, and difficult to reproduce.
+Accurate interpretation of monetary policy, sovereign bond yields, and exchange-rate movements is essential for managing interest-rate risk and understanding changes in the Canadian fixed-income market. However, these indicators are released on different schedules and at different frequencies, which makes them difficult to align and analyze consistently. As a result, yield-curve analysis is often fragmented, time-consuming, and difficult to reproduce.
 
 The problem is relevant because the Government of Canada yield curve is a benchmark for asset pricing, portfolio allocation, and monetary policy assessment. Open data is especially valuable in this context because it allows the full workflow to be verified, reproduced, and reviewed without the barriers associated with proprietary financial datasets.
 
