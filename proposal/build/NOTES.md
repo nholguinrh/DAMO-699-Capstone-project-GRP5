@@ -89,3 +89,20 @@ Thursday — confirm with the team.
   `proposal/sections/` and re-assemble, or the two will drift out of sync.
 - Don't submit before the page-limit check passes, even under deadline pressure — an over-length
   proposal risks a penalty regardless of content quality.
+
+## Reproducible build command (as run, Thu Jul 16 2026)
+
+Markdown assembly is scripted — run from anywhere:
+
+```bash
+./proposal/build/assemble.sh          # -> proposal/build/proposal.md
+```
+
+`assemble.sh` holds the section order, strips frontmatter + HTML authoring comments, and inserts
+`\newpage` before the Title Page and before References. It is the only supported way to build
+`proposal.md`; edit `proposal/sections/`, never `proposal.md`.
+
+**PDF step not yet run.** `pandoc` and `xelatex` are not installed on this machine, so
+`proposal.pdf` has not been produced and the page-limit check has not been run against a real
+render. Whoever installs pandoc should run the command in the "How to assemble" section above and
+record here the exact version + any reference doc used.

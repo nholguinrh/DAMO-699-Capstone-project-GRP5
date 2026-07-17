@@ -1,4 +1,4 @@
-## Introduction
+## 1. Introduction (Project Context)
 
 This capstone project examines the dynamics of the Canadian yield curve using publicly available macro-financial data provided by the Bank of Canada. The yield curve is a fundamental indicator in fixed-income analysis because its shape reflects market expectations regarding interest rates, inflation, and future economic activity.
 

@@ -1,3 +1,3 @@
-## Analytical Objective
+## 3. Analytical Objective
 
 The primary objective of this project is to develop a reproducible data analytics pipeline that integrates publicly available macro-financial data from the Bank of Canada and evaluates the extent to which different time-series models can explain and forecast the slope of the Canadian yield curve. The study will compare ARIMA as a univariate baseline, VAR to capture multivariate interactions among policy rates, sovereign bond yields, and exchange-rate movements, and LSTM to assess whether nonlinear dependencies improve forecasting performance. Model performance will be evaluated using out-of-sample forecast accuracy, such as RMSE and MAE, alongside the interpretability and stability of estimated relationships, in order to determine which approach offers the best trade-off between predictive accuracy and explanatory transparency for yield-curve analysis.

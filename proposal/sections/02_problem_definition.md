@@ -1,4 +1,4 @@
-## Problem Definition
+## 2. Problem Definition
 
 Accurate interpretation of monetary policy, sovereign bond yields, and exchange-rate movements is essential for managing interest-rate risk and understanding changes in the Canadian fixed-income market. However, these indicators are released on different schedules and at different frequencies, which makes them difficult to align and analyze consistently. As a result, yield-curve analysis is often fragmented, time-consuming, and difficult to reproduce.
 

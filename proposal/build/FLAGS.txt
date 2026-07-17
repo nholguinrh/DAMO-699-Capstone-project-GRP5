@@ -1,0 +1,67 @@
+CROSS-SECTION COHERENCE FLAG — raised at assembly, Thu Jul 16 2026
+Owner of the fix: Lerneir (section 05) — per the fix-pass rule in NOTES.md, the
+section owner makes the change, not whoever ran the assembly.
+Status: OPEN. Not fixed at assembly time; this is a content decision.
+
+
+ISSUE 1 — ARIMA is promised in three sections but absent from the methodology.
+
+Sections 03, 06, and 07 all commit the project to an ARIMA model. Section 05, the
+section that actually specifies the analytical approach, never mentions it. Section
+05 specifies only VAR, LSTM, and a Random Walk (naive) benchmark.
+
+Where each section says it:
+
+  03_analytical_objective.md   "The study will compare ARIMA as a univariate
+                                baseline, VAR ... and LSTM"
+  06_expected_outcomes.md      "a controlled comparison of ARIMA, VAR, LSTM, and
+                                naive random-walk forecasts"
+  07_project_plan.md           "the team will implement ARIMA, VAR, and LSTM models"
+                                (Weeks 6-8)
+  05_analytical_approach.md    ARIMA does not appear. Section 5.3 covers VAR and
+                                LSTM. Section 5.4 names Random Walk as the baseline.
+
+Why it matters: this is exactly what the holistic rubric pass in NOTES.md check 2
+looks for -- "does section 3's RQ match section 5's method match section 7's plan?"
+-- and cross-section coherence is graded under "Project Organization and
+Professional Writing." A reader following the document in order is told the
+univariate baseline is ARIMA (03), then handed a methodology where the baseline is
+a Random Walk (05), then told ARIMA gets implemented in Weeks 6-8 (07).
+
+Two ways to resolve; pick one, do not do both:
+
+  (a) Add ARIMA to section 05 -- give it a subsection under 5.3 alongside VAR and
+      LSTM, and state how it relates to the Random Walk baseline in 5.4 (ARIMA as
+      the univariate statistical baseline, Random Walk as the naive floor). This
+      keeps 03/06/07 as written and adds words to 05.
+
+  (b) Drop ARIMA from 03, 06, and 07 -- let the Random Walk stand as the sole
+      baseline, matching 05 as currently written. This removes words from three
+      sections.
+
+Note the interaction with the page limit: section 05 is already 953 words against a
+375-word target and is one of the two sections driving the proposal over the 5-page
+cap. Option (a) makes the overage worse. Option (b) reduces it slightly. That is a
+reason to weigh (b), but it is Lerneir's and the owners' call, not a formatting
+decision -- do not pick (b) purely to save space if ARIMA genuinely belongs in the
+model comparison.
+
+
+ISSUE 2 — VECM appears only in section 05 (lower severity, same root cause).
+
+Section 05 (5.2) raises a Vector Error Correction Model as a possible extension if
+the Johansen test finds cointegration. No other section mentions VECM -- not the
+objective (03), not the expected outcomes (06), and not the project plan (07), so
+no timeline slot exists for building it.
+
+This is defensible as written, because 05 frames VECM as conditional ("may be
+warranted") rather than promised, and the section explicitly says it "does not
+commit to a final model selection." Flagging it only so the decision is deliberate:
+if VECM is a real possibility, 07 should leave room for it in Weeks 6-8; if it is
+not, consider whether the conditional mention earns its words given the page
+pressure on 05.
+
+
+Verification: both issues confirmed by grep against proposal/sections/*.md at
+assembly time, not from memory. Re-check after any fix by re-running
+./proposal/build/assemble.sh and reading the assembled proposal.md end to end.
