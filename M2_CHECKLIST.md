@@ -1,27 +1,120 @@
-Module: reports/ItemSalesReport/compare.php
-URL: https://mark.solucioneshys.net/reports/ItemSalesReport/compare.php
+# M2_CHECKLIST.md — Milestone 2: Preliminary Analysis (Fri Aug 07)
 
-Bug 1 — Charts render empty (axes/labels show, no plotted data)
+> Governed by [`TIMELINE.md`](./TIMELINE.md) §5–6, which is the source of truth for the *date*.
+> This file is the source of truth for the *definition of done* — what "preliminary analysis
+> visible in repo" has to mean before Friday, so a supervisor skim doesn't turn up gaps we
+> could've caught ourselves.
 
-In the "Department Growth — Year vs Year" cards (Outdoor, Produce, etc.), the totals and % change display correctly (e.g. "2026: $309,876.93 · 2025: $397,175.17, -22.0%"), so the underlying query data is correct. But the chart area itself shows only the Y-axis scale, X-axis, and season-band background colors — no line/bar series is drawn.
+## Why this milestone is different from M1/M3
 
-Likely causes to check in compare.php (and any shared chart JS it includes, e.g. in mark.js or an inline <script> block):
+M2 has no dedicated deliverable directory the way the proposal has `proposal/` or the report has
+`report/`. It's a **checkpoint on existing folders** (`data/`, `notebooks/`, `src/`, `README.md`) —
+per the Student Guide (Week 5): *"students must update their GitHub repository with preliminary
+project work. This may include data preprocessing, feature engineering, baseline models, or early
+analysis results. The supervisor will review the repository and provide feedback."* There is no
+PDF to assemble and no page limit — the artifact **is** the repository state on Aug 07.
 
-The chart-drawing JS may be running before the DOM/canvas element exists (script placed above the canvas, or missing DOMContentLoaded/deferred load).
-The series data array passed to the chart function may be empty, malformed, or using the wrong key name (mismatch between what PHP echoes into JS — e.g. json_encode($weeklySeriesY1) — and what the chart-drawing function expects).
-If this uses a <canvas> with manual JS (not a library like Chart.js), check that ctx.beginPath()/moveTo()/lineTo()/stroke() calls are actually being reached, and that coordinate scaling isn't producing NaN (e.g. dividing by a max value of 0 when a week has no data).
-Check the browser console for JS errors on this page — a thrown error partway through chart setup would abort rendering silently for all charts on the page.
-Confirm the two "Outdoor" and "Produce" charts use independently-scoped variables/IDs — if canvas IDs collide or a shared array is being overwritten before both charts render, only one (or neither) would draw.
+There is no numeric score for M2 the way the proposal/report have rubric bands — it's a
+supervisor review with feedback, not a graded rubric gate. Treat this checklist as the bar for
+"nothing to be embarrassed by," not a ≥85 target.
 
-Ask: Inspect compare.php's chart-rendering code end-to-end, find why the series data isn't being plotted, and fix it so both the 2026 and 2025 lines/bars actually render on the weekly chart, matching the totals already shown above each chart.
+## Parallel-track model
 
-Bug 2 — X-axis shows week numbers (W1, W2...) instead of dates
+M2 is deliberately **not** run as one owner per functional area (that was the proposal's model).
+For the three technical rounds — data collection, EDA, and baseline models — two people build
+independent solutions in parallel, using genuinely different approaches, and the other two
+review. The team then picks the better one (or keeps both) before moving on. The point isn't
+redundancy for its own sake — it's that everyone leaves M2 having actually understood the data
+and the pipeline first-hand, not just reviewed someone else's PR, and every technical decision has
+been pressure-tested by someone who built an alternative rather than rubber-stamped.
 
-The weekly chart's X-axis is labeled with ISO week numbers (W1, W2, W3...). Staff find week numbers hard to read — they think in calendar dates, not week-of-year numbers.
+Only after all three rounds converge do the two remaining tasks — feature engineering and the
+outcome/early-results plan — get a single owner each; by that point "understanding the data" is
+no longer the open question, so there's nothing left to parallelize.
 
-Ask: Change the X-axis labels to calendar dates instead of week numbers. Specifically:
+| Round | Task | Path A | Path B | A's reviewer | B's reviewer |
+|-------|------|--------|--------|---------------|---------------|
+| 1 | Data collection & prep | **Giti** — sequential/synchronous pull, one source at a time, manual back-off | **Lerneir** — per-source client classes, concurrent fetch, config-driven series list | Mitchel | Nelson |
+| 2 | Data exploration (EDA) | **Nelson** — Python-native statistical EDA (`01_eda`) | **Mitchel** — Power BI visual/interactive exploration | Lerneir | Giti |
+| 3 | Baseline models | **Giti** — VAR, lag order via AIC | **Mitchel** — VAR, lag order via BIC | Nelson | Lerneir |
+| — | Feature engineering (single) | **Lerneir** (owner) | — | Giti (reviewer) | — |
+| — | Outcome / early-results plan (single) | **Nelson** (owner) | — | Mitchel (reviewer) | — |
 
-Use the week_start_date (already available from the underlying query, same field used elsewhere in this module like trends.php) instead of the ISO week number for axis labels.
-Format as a short, readable date, e.g. Mar 3 or Mar 3, 2026 (per project convention, F j, Y style, shortened for axis space — something like M j).
-Keep the season-band legend (Winter/Spring/Summer/Harvest/Holiday) working correctly against the new date-based axis — the color bands should still align to the correct weeks.
-Apply this consistently to both charts in the Department Growth comparison and any other week-numbered chart on this page (e.g. the "Item & Category Growth Explorer" section further down, if it also uses week numbers).
+**Load check:** every member is a doer/owner exactly twice and a reviewer exactly twice across
+the five rows above (Giti: 1, 3 / 2, feature-eng-review; Lerneir: 1, feature-eng / 2, 3-review;
+Nelson: 2, outcome-plan / 1-review, 3-review; Mitchel: 2, 3 / 1-review, outcome-plan-review). This
+is the deliberate rebalance from the proposal phase, where Giti and Mitchel's sections (title
+page, references, outcomes, ethics) carried less technical weight than Lerneir's and Nelson's —
+here all four get equal hands-on build time on the actual analysis.
+
+No one reviews their own round's other path (reviewers are always drawn from people not building
+either path that round), and reviewer pairs rotate round to round rather than the same two people
+always checking each other.
+
+### Why these specific technical forks
+
+- **Round 1** — both paths must still follow section 5.1's Bronze-layer contract (HTTP pulls
+  against BoC Valet / FRED / StatCan, exponential back-off, timestamped local cache); they differ
+  in orchestration (sequential script vs. concurrent client classes), not in which APIs get
+  called. Compare on: does it survive a rate-limit response, is it readable by someone who didn't
+  write it, how long does a full pull take.
+- **Round 2** — Approach A and B aren't competing on correctness, they're complementary by design:
+  a reproducible notebook record vs. a stakeholder-facing dashboard (Power BI is already in the
+  stack per `README.md`'s Tools & Stack). It's fine — expected, even — for the team to keep both
+  rather than eliminate one.
+- **Round 3** — AIC vs. BIC lag-order selection is explicitly named as the tradeoff in
+  `proposal/sections/05_analytical_approach.md` §5.3 ("selected using AIC and BIC to balance
+  model fit against overfitting risk"), so this fork tests an alternative already inside the
+  approved methodology — neither path touches ARIMA, so this round doesn't depend on
+  `proposal/build/FLAGS.txt` Issue 1 being resolved first.
+
+## Convergence decisions (fill in as each round concludes — Week 4–5 team syncs)
+
+**Round 1 — Data collection:** chosen path — _TBD_. Rationale — _TBD_.
+
+**Round 2 — EDA:** chosen approach — _TBD_ (or: keeping both, Python as reproducible record /
+Power BI as dashboard). Rationale — _TBD_.
+
+**Round 3 — Baseline models:** chosen lag-order criterion — _TBD_ (or: keeping both as a
+sensitivity check). Rationale — _TBD_.
+
+## Definition of done
+
+- [ ] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
+      concurrent client classes) before either was picked — not one built and the other skipped
+- [ ] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
+      produces everything in `data/processed/` using the chosen (or merged) path
+- [ ] `data/README.md` data dictionary reflects every column actually in `data/processed/` (no
+      `TBD` rows left for columns that exist)
+- [ ] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
+      exploration), each built from whichever Round 1 output that analyst independently judged best
+- [ ] Round 2 decision recorded above
+- [ ] Round 3 shipped two independent baseline notebooks (AIC-lag VAR, BIC-lag VAR), both compared
+      against the shared Random Walk benchmark
+- [ ] Round 3 decision recorded above
+- [ ] Feature engineering (Lerneir) consolidates a single Gold-layer pipeline in `src/` informed by
+      both EDA approaches and both baseline attempts — not a third independent attempt
+- [ ] Outcome/early-results plan (Nelson) is a short, honest account of what converged and what's
+      still open, not a polished narrative that hides the rounds that didn't get a full answer
+- [ ] Every notebook re-runs clean, top-to-bottom, from a fresh kernel, with committed outputs —
+      no notebook that only works if cells are run out of order
+- [ ] `src/` has real functions in it if any notebook is duplicating logic across cells (not
+      required if nothing's been extracted yet — don't manufacture an abstraction just to fill
+      the folder)
+- [ ] `README.md` "Roadmap at a Glance" status line reflects Week 5 / M2, not stale Phase 0 text
+- [ ] No raw dataset committed if its license forbids redistribution — access instructions in
+      `data/README.md` instead
+
+## What NOT to do here
+
+- Don't backfill `04_diagnostics` with padding to look further along than the project is —
+  supervisor feedback on a thin-but-honest diagnostics notebook is more useful than feedback on
+  content manufactured to fill the checklist.
+- Don't resolve the ARIMA/VECM flag by silently dropping it from the notebook without updating
+  `03_analytical_objective.md` / `06_expected_outcomes.md` / `07_project_plan.md` to match — that
+  just moves the section 03/05/06/07 mismatch into section 05 vs. the actual repo instead of
+  fixing it (see `proposal/build/FLAGS.txt`, Lerneir owns the fix).
+- Don't hand-edit `data/processed/` output files directly — regenerate them by re-running
+  `02_cleaning` so the pipeline stays reproducible.
+- Don't wait until Fri Aug 07 to open the tracking issue — open it Mon Aug 03 (per `TIMELINE.md`)
+  so gaps surface with days to fix them, not hours.
