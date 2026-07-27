@@ -1,23 +1,5 @@
 # M2_CHECKLIST.md — Milestone 2: Preliminary Analysis (Fri Aug 07)
 
-> Governed by [`TIMELINE.md`](./TIMELINE.md) §5–6, which is the source of truth for the *date*.
-> This file is the source of truth for the *definition of done* — what "preliminary analysis
-> visible in repo" has to mean before Friday, so a supervisor skim doesn't turn up gaps we
-> could've caught ourselves.
-
-## Why this milestone is different from M1/M3
-
-M2 has no dedicated deliverable directory the way the proposal has `proposal/` or the report has
-`report/`. It's a **checkpoint on existing folders** (`data/`, `notebooks/`, `src/`, `README.md`) —
-per the Student Guide (Week 5): *"students must update their GitHub repository with preliminary
-project work. This may include data preprocessing, feature engineering, baseline models, or early
-analysis results. The supervisor will review the repository and provide feedback."* There is no
-PDF to assemble and no page limit — the artifact **is** the repository state on Aug 07.
-
-There is no numeric score for M2 the way the proposal/report have rubric bands — it's a
-supervisor review with feedback, not a graded rubric gate. Treat this checklist as the bar for
-"nothing to be embarrassed by," not a ≥85 target.
-
 ## Parallel-track model
 
 M2 is deliberately **not** run as one owner per functional area (that was the proposal's model).
