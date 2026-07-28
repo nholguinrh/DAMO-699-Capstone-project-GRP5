@@ -1,10 +1,9 @@
 CROSS-SECTION COHERENCE FLAG — raised at assembly, Thu Jul 16 2026
-Owner of the fix: Lerneir (section 05) — per the fix-pass rule in NOTES.md, the
-section owner makes the change, not whoever ran the assembly.
-Status: OPEN. Not fixed at assembly time; this is a content decision.
+Owner of the fix: Lerneir (section 05)
+Status: RESOLVED (Issue 1 resolved via Option a on Jul 28 2026; ARIMA added to §5.3/§5.4 and §3/§3.1 updated).
 
 
-ISSUE 1 — ARIMA is promised in three sections but absent from the methodology.
+ISSUE 1 — RESOLVED: ARIMA added to section 05 and cross-section model list aligned.
 
 Sections 03, 06, and 07 all commit the project to an ARIMA model. Section 05, the
 section that actually specifies the analytical approach, never mentions it. Section
