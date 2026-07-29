@@ -15,7 +15,7 @@ The project will follow a phased analytics lifecycle aligned with the course mil
 
 Weeks 3 to 5 will focus on data readiness. The team will extract and document the required series from the Bank of Canada, FRED, and Statistics Canada; construct the Bronze, Silver, and Gold data layers; align publication and observation dates; assess missingness; and engineer the proposed yield-spread, volatility, momentum, and policy-shock features. Exploratory analysis, stationarity testing, and a naïve random-walk benchmark will provide the preliminary analytical deliverable expected in GitHub by August 7.
 
-During Weeks 6 to 8, the team will implement ARIMA, VAR, and LSTM models using chronological validation and common forecast horizons. Diagnostic testing, rolling-window evaluation, and comparison through RMSE, MAE, and the Diebold–Mariano test will support a model-selection decision based on predictive accuracy, interpretability, and robustness.
+During Weeks 6 to 8, the team will perform Johansen cointegration diagnostics and implement ARIMA, VAR/VECM, and LSTM models using chronological validation and common forecast horizons. Diagnostic testing, rolling-window evaluation, and comparison through RMSE, MAE, and the Diebold–Mariano test will support a model-selection decision based on predictive accuracy, interpretability, and robustness.
 
 Weeks 9 and 10 will be dedicated to final synthesis. The selected findings will inform the Power BI dashboard, practical recommendations, limitations, and final report. The presentation deck will be finalized by September 11, followed by submission of the report, dataset, and reproducible repository by September 13. Poster preparation and rehearsal will continue in Week 11.
 
