@@ -1,0 +1,40 @@
+name: Refresh CPI release dates
+
+on:
+  schedule:
+    # Runs at 09:00 UTC on the 21st of every month -- after StatCan's
+    # mid-month CPI release, so the new month's date is already published.
+    - cron: "0 9 21 * *"
+  workflow_dispatch: {}  # allows manually triggering from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 pdfplumber
+
+      - name: Run refresh script
+        run: python src/build_cpi_release_dates.py
+
+      - name: Open PR if the mapping changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: refresh CPI release-date mapping"
+          title: "Monthly CPI release-date refresh"
+          body: |
+            Automated monthly refresh of `config/cpi_release_dates.csv`
+            from Statistics Canada's official release calendars.
+
+            Please review the diff before merging -- this only updates
+            reference-month-to-release-date mappings, no pipeline logic.
+          branch: auto/refresh-cpi-release-dates
+          delete-branch: true
