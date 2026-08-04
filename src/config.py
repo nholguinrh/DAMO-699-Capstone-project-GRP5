@@ -3,9 +3,23 @@ Configuration for the data-collection pipeline (Issue #24, Path B).
 
 All series identifiers, date ranges, and API settings live here so that
 adding a new series is a one-line config change — no client code touched.
+
+API keys are loaded automatically from a ``.env`` file in the project
+root (via ``python-dotenv``).  See ``.env.example`` for the template.
 """
 
 from pathlib import Path
+
+# ── Load .env file (API keys) ───────────────────────────────────────────────
+# Install once:  pip install python-dotenv
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_ENV_PATH)
+except ImportError:
+    # python-dotenv not installed — fall back to regular env vars
+    pass
+
 
 # ── Date range (proposal §4.1: Jan 2, 2009 – Jun 30, 2026) ──────────────────
 DATE_START = "2009-01-02"
@@ -40,9 +54,8 @@ BOC_USDCAD_CURRENT_START = "2017-05-01"
 # Docs: https://fred.stlouisfed.org/docs/api/fred/
 # To obtain a free API key, register at:
 #   https://fred.stlouisfed.org/docs/api/api_key.html
-# Then set the environment variable before running:
-#   $env:FRED_API_KEY = "your-key-here"   (PowerShell)
-#   export FRED_API_KEY="your-key-here"   (bash)
+# Then add it to your .env file (see .env.example):
+#   FRED_API_KEY=your-key-here
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 FRED_API_KEY_ENV_VAR = "FRED_API_KEY"
 
