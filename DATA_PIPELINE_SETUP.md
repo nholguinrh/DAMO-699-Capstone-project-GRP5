@@ -96,6 +96,12 @@ This writes:
 python src/run_data_collection.py --from-cache
 ```
 
+**Verify what it wrote:**
+
+```bash
+tree data/
+```
+
 Full details, including the `--refresh-cpi-dates` flag and troubleshooting, are in
 [`src/README.md`](./src/README.md).
 
@@ -104,15 +110,19 @@ Full details, including the `--refresh-cpi-dates` flag and troubleshooting, are 
 **Install dependencies:**
 
 ```bash
-pip install python-dotenv requests
+pip install python-dotenv requests jupyterlab
 ```
 
 **Run it** — either via the notebook:
 
 ```bash
 cd notebooks
-jupyter notebook 02_cleaning_path_b.ipynb
+jupyter lab 02_cleaning_path_b.ipynb
 ```
+
+(`jupyter notebook ...` will fail with `Jupyter command 'jupyter-notebook' not found` unless
+you've also installed the separate `notebook` package — `jupyterlab` is the one to install; see
+Troubleshooting below.)
 
 or directly from Python, from the project root:
 
@@ -138,9 +148,9 @@ cwd to the notebook's folder.
 After running Path A (§2) at least once so `data/processed/*.csv` exists:
 
 ```bash
-pip install jupyter matplotlib numpy pandas seaborn statsmodels
+pip install jupyterlab matplotlib numpy pandas seaborn statsmodels
 cd notebooks/01_eda
-jupyter notebook eda.ipynb
+jupyter lab eda.ipynb
 ```
 
 Run all cells top-to-bottom from a fresh kernel (Kernel → Restart & Run All). No further
@@ -214,3 +224,4 @@ doesn't match what the notebook expects, so there are two extra steps versus run
 | `FileNotFoundError` on `data/processed/*.csv` when opening `eda.ipynb` | You ran Path B instead of Path A, or haven't run either yet — see §0. |
 | Notebook's `PROJECT_ROOT` resolves to the wrong folder | Working directory isn't `notebooks/01_eda/`. Locally: reopen via Jupyter's file browser rather than a bare `jupyter notebook` from elsewhere. Colab: see step 5 above. |
 | `HTTP 429` / rate-limit warnings during collection | Normal — both pipelines auto-retry with exponential back-off. Let it run. |
+| `Jupyter command 'jupyter-notebook' not found` | You have `jupyter_core` but not an actual notebook interface. `pip install jupyterlab`, then use `jupyter lab <notebook>.ipynb` (not `jupyter notebook`) — this doc uses `jupyter lab` throughout for that reason. |
