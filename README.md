@@ -93,6 +93,7 @@ This is how we work — read this before contributing.
 
 - **Team Charter (Social Contract):** [./TEAM_CHARTER.md](./TEAM_CHARTER.md) — 🚧 in progress
 - **Schedule:** [./TIMELINE.md](./TIMELINE.md) — 🚧 in progress
+- **Environment & API Setup:** [./docs/SETUP.md](./docs/SETUP.md) — API credentials and local setup
 - **Backlog:** [GitHub Project board](https://github.com/users/nholguinrh/projects/6)
 
 ## Milestones
