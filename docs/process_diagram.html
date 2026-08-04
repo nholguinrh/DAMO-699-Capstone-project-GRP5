@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAMO 699 Capstone Project - End-to-End Analytics Process Diagram</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: rgba(18, 26, 44, 0.75);
+            --bg-card-hover: rgba(28, 40, 68, 0.85);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --border-card-hover: rgba(99, 102, 241, 0.4);
+            
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+            --accent-emerald: #10b981;
+            --accent-rose: #f43f5e;
+
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            
+            --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            min-height: 100vh;
+            padding: 2rem;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.12) 0%, transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.12) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(6, 182, 212, 0.05) 0%, transparent 60%);
+        }
+
+        header {
+            max-width: 1400px;
+            margin: 0 auto 2.5rem auto;
+            text-align: center;
+            position: relative;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+            padding: 0.35rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.75rem;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* Controls bar */
+        .controls-bar {
+            max-width: 1400px;
+            margin: 0 auto 2rem auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            backdrop-filter: blur(12px);
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-filter {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-filter:hover, .btn-filter.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+
+        .info-pill {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* Process Container Grid */
+        .pipeline-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            position: relative;
+        }
+
+        /* Stage Section */
+        .stage-row {
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            gap: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 1.5rem;
+            backdrop-filter: blur(16px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .stage-row:hover {
+            border-color: var(--border-card-hover);
+            box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.5);
+            transform: translateY(-2px);
+        }
+
+        /* Stage Header Card */
+        .stage-meta {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding-right: 1.5rem;
+            border-right: 1px solid var(--border-card);
+        }
+
+        .stage-num {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+
+        .stage-1 .stage-num { color: var(--accent-cyan); }
+        .stage-2 .stage-num { color: var(--accent-blue); }
+        .stage-3 .stage-num { color: var(--accent-purple); }
+        .stage-4 .stage-num { color: var(--accent-amber); }
+        .stage-5 .stage-num { color: var(--accent-emerald); }
+
+        .stage-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.3;
+            margin-bottom: 0.5rem;
+        }
+
+        .stage-desc {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .stage-tech-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 1rem;
+        }
+
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.725rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Step Cards Grid */
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.25rem;
+            align-content: center;
+        }
+
+        .step-card {
+            background: rgba(10, 15, 26, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 1.25rem;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .step-card:hover {
+            background: rgba(20, 30, 50, 0.8);
+            border-color: rgba(99, 102, 241, 0.5);
+            transform: scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+        }
+
+        .step-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .stage-1 .step-icon { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
+        .stage-2 .step-icon { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
+        .stage-3 .step-icon { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
+        .stage-4 .step-icon { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); }
+        .stage-5 .step-icon { background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); }
+
+        .step-name {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.4rem;
+        }
+
+        .step-details {
+            font-size: 0.825rem;
+            color: var(--text-secondary);
+            line-height: 1.45;
+        }
+
+        .step-footer {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px dashed rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .output-badge {
+            font-family: var(--font-mono);
+            color: #a5b4fc;
+        }
+
+        /* Flow Arrow SVG connector */
+        .stage-connector {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 30px;
+            margin: -0.5rem 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        .stage-connector svg {
+            filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.6));
+        }
+
+        /* Modal Details View */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(5, 8, 15, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-body {
+            background: #111827;
+            border: 1px solid var(--border-card-hover);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 680px;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            position: relative;
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-body {
+            transform: translateY(0);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1.25rem;
+            right: 1.25rem;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        .modal-close:hover { color: var(--text-primary); }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .modal-content-text {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-section-header {
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+            color: var(--accent-blue);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-list {
+            list-style: none;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-list li {
+            padding: 0.4rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .modal-list li::before {
+            content: "➔";
+            color: var(--accent-cyan);
+            font-size: 0.8rem;
+        }
+
+        @media (max-width: 900px) {
+            .stage-row {
+                grid-template-columns: 1fr;
+            }
+            .stage-meta {
+                border-right: none;
+                border-bottom: 1px solid var(--border-card);
+                padding-right: 0;
+                padding-bottom: 1.25rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="badge">Master of Data Analytics · DAMO 699 Capstone</div>
+        <h1>Yield Curve & Monetary Policy Analytics Process</h1>
+        <p>An interactive architectural blueprint illustrating the 5-stage data engineering, econometric modeling, deep learning, and analytical evaluation pipeline using Bank of Canada macro-financial data.</p>
+    </header>
+
+    <div class="controls-bar">
+        <div class="filter-group">
+            <button class="btn-filter active" onclick="filterStage('all')">All Stages</button>
+            <button class="btn-filter" onclick="filterStage('stage-1')">1. Data Eng</button>
+            <button class="btn-filter" onclick="filterStage('stage-2')">2. Diagnostics</button>
+            <button class="btn-filter" onclick="filterStage('stage-3')">3. Models</button>
+            <button class="btn-filter" onclick="filterStage('stage-4')">4. Evaluation</button>
+            <button class="btn-filter" onclick="filterStage('stage-5')">5. Delivery</button>
+        </div>
+        <div class="info-pill">✨ Click any card for detailed specifications</div>
+    </div>
+
+    <div class="pipeline-container">
+
+        <!-- STAGE 1 -->
+        <div class="stage-row stage-1" id="stage-1">
+            <div class="stage-meta">
+                <div>
+                    <div class="stage-num">Stage 01</div>
+                    <div class="stage-title">Data Engineering & Medallion Pipeline</div>
+                    <div class="stage-desc">Extracts raw macro-financial series via API, applies temporal alignment, and engineers econometric features.</div>
+                </div>
+                <div class="stage-tech-tags">
+                    <span class="tag">Python</span>
+                    <span class="tag">Valet API</span>
+                    <span class="tag">Pandas</span>
+                    <span class="tag">Medallion</span>
+                </div>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card" onclick="openModal('bronze')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">📦</span>
+                            <span class="output-badge">Bronze Layer</span>
+                        </div>
+                        <div class="step-name">Raw API Ingestion</div>
+                        <div class="step-details">Fetches daily BoC policy rates, 1Y–10Y bond yields, USD/CAD exchange rates, and monthly CPI via REST API with exponential back-off.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: BoC Valet REST</span>
+                        <span>Raw JSON</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('silver')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">🧹</span>
+                            <span class="output-badge">Silver Layer</span>
+                        </div>
+                        <div class="step-name">Temporal Alignment & Cleaning</div>
+                        <div class="step-details">Aligns calendar dates, handles statutory holiday mismatches via ffill, and merges monthly CPI using pandas merge_asof.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Raw JSON</span>
+                        <span>Clean DataFrame</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('gold')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">⚡</span>
+                            <span class="output-badge">Gold Layer</span>
+                        </div>
+                        <div class="step-name">Feature Construction</div>
+                        <div class="step-details">Engineers 10Y-2Y yield spreads (recession indicator), CA-US spreads, 20/60-day rolling volatility, and BoC policy announcement indicators.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Clean DataFrame</span>
+                        <span>Feature Matrix</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stage-connector">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        </div>
+
+        <!-- STAGE 2 -->
+        <div class="stage-row stage-2" id="stage-2">
+            <div class="stage-meta">
+                <div>
+                    <div class="stage-num">Stage 02</div>
+                    <div class="stage-title">Time-Series Diagnostics</div>
+                    <div class="stage-desc">Verifies statistical properties, tests for non-stationarity, applies differences, and screens for cointegration.</div>
+                </div>
+                <div class="stage-tech-tags">
+                    <span class="tag">Statsmodels</span>
+                    <span class="tag">ADF Test</span>
+                    <span class="tag">Johansen</span>
+                    <span class="tag">Stationarity</span>
+                </div>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card" onclick="openModal('adf')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">📈</span>
+                            <span class="output-badge">Stationarity</span>
+                        </div>
+                        <div class="step-name">ADF Unit-Root Testing</div>
+                        <div class="step-details">Executes Augmented Dickey-Fuller tests to determine unit roots and unit differencing requirements for each series.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Gold Matrix</span>
+                        <span>p-values / I(d)</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('transforms')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">🔄</span>
+                            <span class="output-badge">Transforms</span>
+                        </div>
+                        <div class="step-name">Stationary Transformations</div>
+                        <div class="step-details">Applies basis-point first-differencing (&Delta;y_t) to yields and log-differencing (&Delta;ln(x_t)) to USD/CAD and CPI to prevent spurious regressions.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Raw Levels</span>
+                        <span>Stationary Series</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('cointegration')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">🔗</span>
+                            <span class="output-badge">Equilibrium</span>
+                        </div>
+                        <div class="step-name">Johansen Cointegration</div>
+                        <div class="step-details">Tests for long-run equilibrium relationships (r &ge; 1) among level series to select between VAR and VECM model specifications.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Level Series</span>
+                        <span>Trace / Max-Eigen</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stage-connector">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        </div>
+
+        <!-- STAGE 3 -->
+        <div class="stage-row stage-3" id="stage-3">
+            <div class="stage-meta">
+                <div>
+                    <div class="stage-num">Stage 03</div>
+                    <div class="stage-title">Econometric & Deep Learning Modeling</div>
+                    <div class="stage-desc">Estimates benchmark ARIMA, multivariate VAR/VECM systems, and nonlinear LSTM neural networks with SHAP interpretability.</div>
+                </div>
+                <div class="stage-tech-tags">
+                    <span class="tag">Auto-ARIMA</span>
+                    <span class="tag">VAR/VECM</span>
+                    <span class="tag">PyTorch/Keras</span>
+                    <span class="tag">SHAP</span>
+                </div>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card" onclick="openModal('arima')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">🎯</span>
+                            <span class="output-badge">Univariate</span>
+                        </div>
+                        <div class="step-name">Auto-ARIMA Baseline</div>
+                        <div class="step-details">Automated Box-Jenkins selection of optimal (p,d,q) parameters guided by AIC/BIC minimization to isolate pure autocorrelation signals.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Yield Spread</span>
+                        <span>Univariate Baseline</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('varvecm')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">⚙️</span>
+                            <span class="output-badge">Multivariate</span>
+                        </div>
+                        <div class="step-name">VAR / VECM System</div>
+                        <div class="step-details">Models interdependencies between policy rate, yields, USD/CAD, and CPI. Generates IRFs, FEVD, and Granger causality tests.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Multi-series</span>
+                        <span>IRF / FEVD Outputs</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('lstm')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">🧠</span>
+                            <span class="output-badge">Deep Learning</span>
+                        </div>
+                        <div class="step-name">LSTM + SHAP Model</div>
+                        <div class="step-details">Single-layer LSTM with dropout, early stopping, and rolling-window CV. Computes SHAP values to explain feature contributions.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Gold Window</span>
+                        <span>Nonlinear Forecasts</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stage-connector">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        </div>
+
+        <!-- STAGE 4 -->
+        <div class="stage-row stage-4" id="stage-4">
+            <div class="stage-meta">
+                <div>
+                    <div class="stage-num">Stage 04</div>
+                    <div class="stage-title">Model Comparison & Evaluation</div>
+                    <div class="stage-desc">Evaluates out-of-sample forecast accuracy across multiple horizons and validates superiority via statistical tests.</div>
+                </div>
+                <div class="stage-tech-tags">
+                    <span class="tag">RMSE / MAE</span>
+                    <span class="tag">Diebold-Mariano</span>
+                    <span class="tag">Multi-Horizon</span>
+                    <span class="tag">Naïve Floor</span>
+                </div>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card" onclick="openModal('horizons')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">📅</span>
+                            <span class="output-badge">Horizons</span>
+                        </div>
+                        <div class="step-name">Multi-Step Forecasting</div>
+                        <div class="step-details">Generates out-of-sample predictions across 1-day, 5-day (1-week), and 20-day (1-month) forecasting horizons.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Test Windows</span>
+                        <span>Forecast Matrices</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('metrics')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">📊</span>
+                            <span class="output-badge">Error Metrics</span>
+                        </div>
+                        <div class="step-name">RMSE & MAE Assessment</div>
+                        <div class="step-details">Quantifies prediction accuracy against actual yield curve observations, benchmarking all candidate models against a Naïve Random Walk floor.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Predictions</span>
+                        <span>Error Metrics</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('dmtest')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">⚖️</span>
+                            <span class="output-badge">Hypothesis Test</span>
+                        </div>
+                        <div class="step-name">Diebold-Mariano Test</div>
+                        <div class="step-details">Executes formal hypothesis testing to confirm whether differences in forecast accuracy between VAR/VECM, LSTM, and ARIMA are statistically significant.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Forecast Errors</span>
+                        <span>DM Test Statistics</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stage-connector">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        </div>
+
+        <!-- STAGE 5 -->
+        <div class="stage-row stage-5" id="stage-5">
+            <div class="stage-meta">
+                <div>
+                    <div class="stage-num">Stage 05</div>
+                    <div class="stage-title">Analytics Delivery & Dashboard</div>
+                    <div class="stage-desc">Translates technical findings into interactive Power BI dashboards, stakeholder reports, and academic capstone deliverables.</div>
+                </div>
+                <div class="stage-tech-tags">
+                    <span class="tag">Power BI</span>
+                    <span class="tag">Report</span>
+                    <span class="tag">Presentation</span>
+                    <span class="tag">Poster</span>
+                </div>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card" onclick="openModal('powerbi')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">💻</span>
+                            <span class="output-badge">Dashboard</span>
+                        </div>
+                        <div class="step-name">Power BI Interactive App</div>
+                        <div class="step-details">Interactive yield curve dynamic visualizer, scenario simulation, macroeconomic transmission view, and model leaderboard.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Model Outputs</span>
+                        <span>Power BI (.pbix)</span>
+                    </div>
+                </div>
+
+                <div class="step-card" onclick="openModal('report')">
+                    <div>
+                        <div class="step-header">
+                            <span class="step-icon">📄</span>
+                            <span class="output-badge">Capstones</span>
+                        </div>
+                        <div class="step-name">Final Report & Presentation</div>
+                        <div class="step-details">Comprehensive peer-reviewed capstone report, presentation slide deck, academic poster, and reflective learning paper.</div>
+                    </div>
+                    <div class="step-footer">
+                        <span>Input: Project Synthesis</span>
+                        <span>PDF / Slides</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal Popup for Detailed Node Info -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-body" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeModalDirect()">&times;</button>
+            <div class="modal-title" id="modal-title">Node Specification</div>
+            <div class="modal-content-text" id="modal-desc">Detailed specification content here...</div>
+            <div class="modal-section-header">Key Outputs & Technical Artifacts</div>
+            <ul class="modal-list" id="modal-list">
+                <li>Item 1</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const modalData = {
+            bronze: {
+                title: "📦 Bronze Layer: Raw API Ingestion",
+                desc: "Extracts daily observations from the Bank of Canada Valet REST API endpoints. Uses custom python request handlers with randomized exponential back-off to adhere strictly to server rate limits.",
+                items: [
+                    "Raw JSON payloads stored in data/raw/",
+                    "Bank of Canada Overnight Policy Rate series (v39079)",
+                    "Government of Canada Bond Yields (1Y, 2Y, 5Y, 10Y maturities)",
+                    "USD/CAD Exchange Rate daily closes",
+                    "Monthly Consumer Price Index (CPI) inflation series"
+                ]
+            },
+            silver: {
+                title: "🧹 Silver Layer: Temporal Alignment & Cleaning",
+                desc: "Transforms unstructured JSON responses into clean relational DataFrames. Resolves cross-border calendar mismatches and statutory holiday gaps via forward-fill (ffill). Merges monthly CPI into daily trading indices using pandas merge_asof.",
+                items: [
+                    "Clean aligned DataFrame stored in data/processed/",
+                    "Zero null values across all daily trading observations",
+                    "Synchronized Canadian and US market trading calendars",
+                    "As-of merged monthly CPI mapped to daily observations"
+                ]
+            },
+            gold: {
+                title: "⚡ Gold Layer: Feature Construction",
+                desc: "Engineers specialized financial and econometric domain features required for vector autoregression and deep learning models.",
+                items: [
+                    "10Y minus 2Y Sovereign Yield Spread (Primary Recession Indicator)",
+                    "Canada vs. United States 10Y Sovereign Bond Yield Spread",
+                    "20-day & 60-day Rolling Yield Volatility and Momentum",
+                    "Binary indicators for Bank of Canada Fixed Announcement Dates (FADs)"
+                ]
+            },
+            adf: {
+                title: "📈 ADF Unit-Root Testing",
+                desc: "Determines whether each input macroeconomic time series is stationary or contains a unit root using Augmented Dickey-Fuller tests (Dickey & Fuller, 1979).",
+                items: [
+                    "Test statistics and p-values recorded for level series",
+                    "Identification of Integration Order I(0) vs I(1)",
+                    "Rejection thresholds set at alpha = 0.05 level"
+                ]
+            },
+            transforms: {
+                title: "🔄 Stationary Transformations",
+                desc: "Applies mathematically sound transformations to eliminate non-stationarity and prevent spurious regression results in VAR modeling.",
+                items: [
+                    "Basis-point first-differencing (&Delta;y_t = y_t - y_{t-1}) for interest rate yields",
+                    "Log-differencing (&Delta;ln(x_t)) for USD/CAD exchange rate and CPI",
+                    "Verification of transformed series stationarity via post-ADF tests"
+                ]
+            },
+            cointegration: {
+                title: "🔗 Johansen Cointegration Test",
+                desc: "Evaluates whether non-stationary level series share long-run equilibrium relationships using Johansen Trace and Maximum Eigenvalue tests.",
+                items: [
+                    "Determination of cointegration rank r",
+                    "If r >= 1: Model specified as Vector Error Correction Model (VECM)",
+                    "If r = 0: Model specified as Stationary Vector Autoregression (VAR)"
+                ]
+            },
+            arima: {
+                title: "🎯 Auto-ARIMA Baseline Model",
+                desc: "Implements a univariate ARIMA(p,d,q) baseline using automated Box-Jenkins optimization guided by Akaike Information Criterion (AIC).",
+                items: [
+                    "Optimal lag order (p, d, q) selection",
+                    "Pure autocorrelation benchmark isolating internal yield dynamics",
+                    "Out-of-sample baseline prediction generation"
+                ]
+            },
+            varvecm: {
+                title: "⚙️ VAR / VECM System Estimation",
+                desc: "Estimates multivariate linear dynamic interdependencies across policy rate, bond yields, exchange rate, and CPI. Includes diagnostic interpretation tools.",
+                items: [
+                    "AIC / BIC guided optimal system lag order p selection",
+                    "Impulse Response Functions (IRF) mapping policy shock transmission",
+                    "Forecast Error Variance Decomposition (FEVD) quantifying driver weights",
+                    "Granger Causality directional tests"
+                ]
+            },
+            lstm: {
+                title: "🧠 LSTM Deep Learning + SHAP",
+                desc: "Shallow Long Short-Term Memory recurrent neural network capturing potential non-linear macroeconomic regime shifts.",
+                items: [
+                    "Single LSTM layer with dropout regularization to avoid overfitting",
+                    "Rolling-window cross-validation preserving temporal order",
+                    "SHAP (SHapley Additive exPlanations) values for model interpretability"
+                ]
+            },
+            horizons: {
+                title: "📅 Multi-Step Out-of-Sample Forecasting",
+                desc: "Evaluates predictive accuracy across multiple standard financial planning horizons without look-ahead bias.",
+                items: [
+                    "1-day ahead immediate trading forecast",
+                    "5-day ahead (1-week) policy reaction horizon",
+                    "20-day ahead (1-month) macro trend horizon"
+                ]
+            },
+            metrics: {
+                title: "📊 Error Metrics & Naïve Benchmark",
+                desc: "Calculates out-of-sample prediction error metrics across all candidate models, benchmarking performance against a Naïve Random Walk floor.",
+                items: [
+                    "Root Mean Squared Error (RMSE) calculation",
+                    "Mean Absolute Error (MAE) calculation",
+                    "Naïve baseline comparison (Tomorrow's yield = Today's yield)"
+                ]
+            },
+            dmtest: {
+                title: "⚖️ Diebold-Mariano Statistical Testing",
+                desc: "Formal pairwise statistical test (Diebold & Mariano, 1995) to confirm whether forecasting improvements are statistically significant.",
+                items: [
+                    "Pairwise DM test statistics and p-values",
+                    "Verification of LSTM vs VAR/VECM vs ARIMA superiority",
+                    "Validation of rubric standard for rigorous model selection"
+                ]
+            },
+            powerbi: {
+                title: "💻 Power BI Interactive Dashboard",
+                desc: "Executive analytical visual dashboard connecting data engineering outputs and model forecasts for business decision-makers.",
+                items: [
+                    "Yield curve shape dynamic visualizer (Normal, Inverted, Humped)",
+                    "Policy rate shock scenario simulator",
+                    "Model error metric comparison leaderboard"
+                ]
+            },
+            report: {
+                title: "📄 Capstone Final Report & Academic Artifacts",
+                desc: "Complete academic deliverable package aligned with DAMO 699 rubric standards.",
+                items: [
+                    "Formal Capstone Report chapters in report/",
+                    "Executive Presentation Slide Deck",
+                    "Academic Poster Presentation",
+                    "Reflective Learning Paper"
+                ]
+            }
+        };
+
+        function openModal(key) {
+            const data = modalData[key];
+            if (!data) return;
+            document.getElementById('modal-title').innerHTML = data.title;
+            document.getElementById('modal-desc').innerText = data.desc;
+            
+            const listEl = document.getElementById('modal-list');
+            listEl.innerHTML = data.items.map(item => `<li>${item}</li>`).join('');
+            
+            document.getElementById('modal-overlay').classList.add('active');
+        }
+
+        function closeModal(event) {
+            if (event.target.id === 'modal-overlay') {
+                document.getElementById('modal-overlay').classList.remove('active');
+            }
+        }
+
+        function closeModalDirect() {
+            document.getElementById('modal-overlay').classList.remove('active');
+        }
+
+        function filterStage(stageId) {
+            const buttons = document.querySelectorAll('.btn-filter');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            const rows = document.querySelectorAll('.stage-row');
+            const connectors = document.querySelectorAll('.stage-connector');
+
+            if (stageId === 'all') {
+                rows.forEach(row => row.style.display = 'grid');
+                connectors.forEach(c => c.style.display = 'flex');
+            } else {
+                rows.forEach(row => {
+                    if (row.id === stageId) {
+                        row.style.display = 'grid';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+                connectors.forEach(c => c.style.display = 'none');
+            }
+        }
+    </script>
+</body>
+</html>

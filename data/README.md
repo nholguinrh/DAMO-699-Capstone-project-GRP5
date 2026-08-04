@@ -3,6 +3,11 @@
 - `raw/` — original, unmodified source datasets as obtained.
 - `processed/` — cleaned and preprocessed datasets ready for analysis.
 
+## Setup & API Credentials
+
+For instructions on setting up API credentials (`.env`) and running the data collection pipeline, see [`docs/SETUP.md`](../docs/SETUP.md).
+
+
 ## Data dictionary
 
 <!-- Placeholder. One row per variable, filled in once the dataset is chosen. -->
