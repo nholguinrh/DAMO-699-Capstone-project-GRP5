@@ -1,0 +1,901 @@
+import argparse
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+
+from http_utils import get_with_retry
+from project_paths import PROJECT_ROOT, PROCESSED_DIR, RAW_DIR
+
+
+# ---------------------------------------------------------
+# 1. Folder and file configuration
+# ---------------------------------------------------------
+
+STATCAN_RAW_DIR = RAW_DIR / "statcan"
+CONFIG_DIR = PROJECT_ROOT / "config"
+
+STATCAN_RAW_DIR.mkdir(parents=True, exist_ok=True)
+PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+PROCESSED_FILE = PROCESSED_DIR / "statcan_cpi.csv"
+
+RELEASE_DATE_FILE = (
+    CONFIG_DIR
+    / "cpi_release_dates.csv"
+)
+
+# Reference months StatCan's own historical archive currently cannot
+# answer (both source catalog pages 500-error / timeout as of Aug 2026):
+#   https://www150.statcan.gc.ca/n1/en/catalogue/62-001-X2010004
+#   https://www150.statcan.gc.ca/n1/en/catalogue/62-001-X2010009
+# See build_cpi_release_dates.py's MANUAL_OVERRIDES comments for the
+# full investigation. This is a documented, accepted gap -- not a
+# pipeline bug -- so these two months are allowed through with a null
+# release_date rather than blocking the whole run. Any OTHER missing
+# month still hard-fails in align_to_release_dates() below.
+KNOWN_UNMAPPED_CPI_MONTHS = {
+    pd.Timestamp("2010-04-01"),
+    pd.Timestamp("2010-09-01"),
+}
+
+
+# ---------------------------------------------------------
+# 2. Statistics Canada API configuration
+# ---------------------------------------------------------
+
+BASE_URL = (
+    "https://www150.statcan.gc.ca/"
+    "t1/wds/rest/"
+    "getDataFromVectorByReferencePeriodRange"
+)
+
+VECTOR_ID = "41690973"
+
+START_DATE = "2009-01-01"
+END_DATE = "2026-06-30"
+
+
+# ---------------------------------------------------------
+# 3. Download raw CPI data
+# ---------------------------------------------------------
+
+def download_raw_data() -> Path:
+    """
+    Download Statistics Canada CPI observations using the
+    Web Data Service API.
+
+    The HTTP request uses synchronous retry logic supplied by
+    get_with_retry().
+
+    Returns
+    -------
+    Path
+        Location of the saved raw JSON file.
+    """
+
+    params = {
+        "vectorIds": VECTOR_ID,
+        "startRefPeriod": START_DATE,
+        "endReferencePeriod": END_DATE,
+    }
+
+    print(
+        "Downloading Statistics Canada CPI data..."
+    )
+
+    response = get_with_retry(
+        BASE_URL,
+        params=params,
+        timeout=60,
+        max_retries=5,
+    )
+
+    print(
+        "Statistics Canada status code:",
+        response.status_code,
+    )
+
+    data = response.json()
+
+    validate_api_response(data)
+
+    observations = extract_observations(data)
+
+    print(
+        "Number of CPI observations:",
+        len(observations),
+    )
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    raw_file = (
+        STATCAN_RAW_DIR
+        / f"cpi_{VECTOR_ID}_{timestamp}.json"
+    )
+
+    with raw_file.open(
+        mode="w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            indent=4,
+        )
+
+    print("\nRaw Statistics Canada JSON saved to:")
+    print(raw_file)
+
+    return raw_file
+
+
+# ---------------------------------------------------------
+# 4. Validate the API response
+# ---------------------------------------------------------
+
+def validate_api_response(
+    data: object,
+) -> None:
+    """
+    Validate the structure and status of a Statistics Canada
+    Web Data Service response.
+    """
+
+    if not isinstance(data, list):
+        raise ValueError(
+            "Statistics Canada response must be a list."
+        )
+
+    if not data:
+        raise ValueError(
+            "Statistics Canada returned an empty response."
+        )
+
+    result = data[0]
+
+    if not isinstance(result, dict):
+        raise ValueError(
+            "Statistics Canada response item is not a dictionary."
+        )
+
+    status = result.get("status")
+
+    if status != "SUCCESS":
+        raise ValueError(
+            "Statistics Canada request failed. "
+            f"Response status: {status}. "
+            f"Response: {result}"
+        )
+
+    response_object = result.get("object")
+
+    if not isinstance(response_object, dict):
+        raise ValueError(
+            "Statistics Canada response does not contain "
+            "a valid 'object' section."
+        )
+
+    observations = response_object.get(
+        "vectorDataPoint"
+    )
+
+    if observations is None:
+        raise ValueError(
+            "Statistics Canada response does not contain "
+            "'vectorDataPoint'."
+        )
+
+    if not observations:
+        raise ValueError(
+            "Statistics Canada returned no CPI observations."
+        )
+
+
+# ---------------------------------------------------------
+# 5. Extract observations
+# ---------------------------------------------------------
+
+def extract_observations(
+    data: list,
+) -> list:
+    """
+    Extract CPI vector observations from the validated response.
+    """
+
+    return data[0]["object"]["vectorDataPoint"]
+
+
+# ---------------------------------------------------------
+# 6. Find cached raw JSON
+# ---------------------------------------------------------
+
+def find_latest_cached_json() -> Path:
+    """
+    Find the most recently modified Statistics Canada CPI
+    raw JSON file.
+    """
+
+    cached_files = sorted(
+        STATCAN_RAW_DIR.glob(
+            f"cpi_{VECTOR_ID}_*.json"
+        ),
+        key=lambda file_path: (
+            file_path.stat().st_mtime
+        ),
+        reverse=True,
+    )
+
+    if not cached_files:
+        raise FileNotFoundError(
+            "No cached Statistics Canada CPI JSON "
+            f"was found in {STATCAN_RAW_DIR}"
+        )
+
+    latest_file = cached_files[0]
+
+    print(
+        "Using cached Statistics Canada JSON:"
+    )
+    print(latest_file)
+
+    return latest_file
+
+
+# ---------------------------------------------------------
+# 7. Load cached raw JSON
+# ---------------------------------------------------------
+
+def load_raw_json(
+    raw_file: Path,
+) -> list:
+    """
+    Load and validate a cached Statistics Canada JSON file.
+    """
+
+    if not raw_file.exists():
+        raise FileNotFoundError(
+            f"Raw JSON file does not exist: {raw_file}"
+        )
+
+    with raw_file.open(
+        mode="r",
+        encoding="utf-8",
+    ) as file:
+        data = json.load(file)
+
+    validate_api_response(data)
+
+    return data
+
+
+# ---------------------------------------------------------
+# 8. Convert observations to a DataFrame
+# ---------------------------------------------------------
+
+def create_cpi_dataframe(
+    data: list,
+) -> pd.DataFrame:
+    """
+    Convert CPI vector observations into a DataFrame.
+
+    The source reference period is retained as
+    reference_month. It is not treated as the date on which
+    the CPI value became publicly available.
+    """
+
+    observations = extract_observations(data)
+
+    cpi_df = pd.DataFrame(observations)
+
+    required_raw_columns = {
+        "refPer",
+        "value",
+    }
+
+    missing_raw_columns = (
+        required_raw_columns
+        - set(cpi_df.columns)
+    )
+
+    if missing_raw_columns:
+        raise ValueError(
+            "Statistics Canada raw data is missing columns: "
+            f"{sorted(missing_raw_columns)}"
+        )
+
+    cpi_df = cpi_df[
+        [
+            "refPer",
+            "value",
+        ]
+    ].copy()
+
+    cpi_df = cpi_df.rename(
+        columns={
+            "refPer": "reference_month",
+            "value": "cpi_all_items",
+        }
+    )
+
+    cpi_df["reference_month"] = pd.to_datetime(
+        cpi_df["reference_month"],
+        errors="coerce",
+    )
+
+    cpi_df["cpi_all_items"] = pd.to_numeric(
+        cpi_df["cpi_all_items"],
+        errors="coerce",
+    )
+
+    cpi_df = (
+        cpi_df
+        .dropna(subset=["reference_month"])
+        .drop_duplicates(
+            subset=["reference_month"]
+        )
+        .sort_values("reference_month")
+        .reset_index(drop=True)
+    )
+
+    return cpi_df
+
+
+# ---------------------------------------------------------
+# 9. Load official CPI release-date mapping
+# ---------------------------------------------------------
+
+def load_release_date_mapping() -> pd.DataFrame:
+    """
+    Load the CPI publication-date mapping.
+
+    Required file:
+        config/cpi_release_dates.csv
+
+    Required columns:
+        reference_month
+        release_date
+
+    The release date must be based on an official Statistics
+    Canada CPI release calendar or release publication.
+
+    The script intentionally does not invent publication dates
+    by adding a fixed number of days to the reference month.
+    """
+
+    if not RELEASE_DATE_FILE.exists():
+        raise FileNotFoundError(
+            "CPI release-date mapping was not found.\n"
+            f"Expected file: {RELEASE_DATE_FILE}\n\n"
+            "Create config/cpi_release_dates.csv with these "
+            "columns:\n"
+            "reference_month,release_date\n"
+            "2009-01-01,YYYY-MM-DD\n"
+            "2009-02-01,YYYY-MM-DD\n"
+            "...\n\n"
+            "Use official Statistics Canada CPI publication "
+            "dates. Do not use an assumed fixed monthly offset."
+        )
+
+    release_df = pd.read_csv(
+        RELEASE_DATE_FILE,
+        dtype=str,
+    )
+
+    required_columns = {
+        "reference_month",
+        "release_date",
+    }
+
+    missing_columns = (
+        required_columns
+        - set(release_df.columns)
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "CPI release-date mapping is missing columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+    release_df = release_df[
+        [
+            "reference_month",
+            "release_date",
+        ]
+    ].copy()
+
+    release_df["reference_month"] = (
+        pd.to_datetime(
+            release_df["reference_month"],
+            errors="coerce",
+        )
+    )
+
+    release_df["release_date"] = pd.to_datetime(
+        release_df["release_date"],
+        errors="coerce",
+    )
+
+    invalid_reference_dates = (
+        release_df["reference_month"].isna().sum()
+    )
+
+    invalid_release_dates = (
+        release_df["release_date"].isna().sum()
+    )
+
+    if invalid_reference_dates:
+        raise ValueError(
+            "The release-date mapping contains "
+            f"{invalid_reference_dates} invalid "
+            "reference_month value(s)."
+        )
+
+    if invalid_release_dates:
+        raise ValueError(
+            "The release-date mapping contains "
+            f"{invalid_release_dates} invalid "
+            "release_date value(s)."
+        )
+
+    if release_df[
+        "reference_month"
+    ].duplicated().any():
+        duplicate_months = release_df.loc[
+            release_df[
+                "reference_month"
+            ].duplicated(
+                keep=False
+            ),
+            "reference_month",
+        ]
+
+        raise ValueError(
+            "Duplicate reference months were found in the "
+            "CPI release-date mapping: "
+            f"{duplicate_months.dt.strftime('%Y-%m-%d').tolist()}"
+        )
+
+    release_df = (
+        release_df
+        .sort_values("reference_month")
+        .reset_index(drop=True)
+    )
+
+    return release_df
+
+
+# ---------------------------------------------------------
+# 10. Align CPI observations to release dates
+# ---------------------------------------------------------
+
+def align_to_release_dates(
+    cpi_df: pd.DataFrame,
+    release_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Merge CPI reference periods with official publication dates.
+
+    The release_date field represents the first date on which the
+    CPI observation may be used by downstream models.
+    """
+
+    aligned_df = cpi_df.merge(
+        release_df,
+        on="reference_month",
+        how="left",
+        validate="one_to_one",
+    )
+
+    missing_release_dates = (
+        aligned_df["release_date"].isna()
+    )
+
+    missing_count = (
+        missing_release_dates.sum()
+    )
+
+    if missing_count:
+        missing_months_ts = aligned_df.loc[
+            missing_release_dates,
+            "reference_month",
+        ]
+
+        unexpected = missing_months_ts[
+            ~missing_months_ts.isin(KNOWN_UNMAPPED_CPI_MONTHS)
+        ]
+
+        if not unexpected.empty:
+            raise ValueError(
+                f"{len(unexpected)} CPI observation(s) do not have an "
+                "official release-date mapping, and are not in the "
+                "documented KNOWN_UNMAPPED_CPI_MONTHS allowlist. "
+                f"Missing reference months: "
+                f"{unexpected.dt.strftime('%Y-%m-%d').tolist()}"
+            )
+
+        known = missing_months_ts[
+            missing_months_ts.isin(KNOWN_UNMAPPED_CPI_MONTHS)
+        ]
+        print(
+            f"NOTE: {len(known)} CPI observation(s) have no release-date "
+            "mapping, but are in the documented KNOWN_UNMAPPED_CPI_MONTHS "
+            "allowlist (StatCan's own archive currently can't answer "
+            f"these): {known.dt.strftime('%Y-%m-%d').tolist()}. "
+            "release_date will be left null for these rows; downstream "
+            "cleaning/feature-engineering steps must handle this "
+            "explicitly rather than assume every row has a release date."
+        )
+
+    invalid_timing = (
+        aligned_df["release_date"]
+        <= aligned_df["reference_month"]
+    )
+
+    if invalid_timing.any():
+        invalid_rows = aligned_df.loc[
+            invalid_timing,
+            [
+                "reference_month",
+                "release_date",
+            ],
+        ]
+
+        raise ValueError(
+            "One or more CPI release dates are not later than "
+            "their reference months:\n"
+            f"{invalid_rows}"
+        )
+
+    aligned_df = aligned_df[
+        [
+            "reference_month",
+            "release_date",
+            "cpi_all_items",
+        ]
+    ].copy()
+
+    # NOTE: any row in KNOWN_UNMAPPED_CPI_MONTHS has release_date = NaT
+    # and will sort to the END of this dataframe (pandas' default
+    # na_position="last"), out of chronological order relative to its
+    # reference_month. If downstream code assumes release_date-sorted
+    # rows are also reference_month-ordered, handle these rows
+    # explicitly rather than relying on this sort.
+    aligned_df = (
+        aligned_df
+        .sort_values("release_date")
+        .reset_index(drop=True)
+    )
+
+    return aligned_df
+
+
+# ---------------------------------------------------------
+# 11. Validate processed CPI data
+# ---------------------------------------------------------
+
+def validate_dataframe(
+    cpi_df: pd.DataFrame,
+) -> None:
+    """
+    Validate the final CPI dataset.
+    """
+
+    required_columns = {
+        "reference_month",
+        "release_date",
+        "cpi_all_items",
+    }
+
+    missing_columns = (
+        required_columns
+        - set(cpi_df.columns)
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "Processed CPI dataset is missing columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+    if cpi_df.empty:
+        raise ValueError(
+            "The processed CPI dataset is empty."
+        )
+
+    if cpi_df[
+        "reference_month"
+    ].isna().any():
+        raise ValueError(
+            "The processed CPI dataset contains invalid "
+            "reference months."
+        )
+
+    missing_release_dates = cpi_df["release_date"].isna()
+
+    if missing_release_dates.any():
+        unmapped_months = cpi_df.loc[
+            missing_release_dates,
+            "reference_month",
+        ]
+
+        unexpected = unmapped_months[
+            ~unmapped_months.isin(KNOWN_UNMAPPED_CPI_MONTHS)
+        ]
+
+        if not unexpected.empty:
+            raise ValueError(
+                "The processed CPI dataset contains missing release "
+                "dates that are not in the documented "
+                "KNOWN_UNMAPPED_CPI_MONTHS allowlist: "
+                f"{unexpected.dt.strftime('%Y-%m-%d').tolist()}"
+            )
+
+        print(
+            f"NOTE (validate_dataframe): {len(unmapped_months)} row(s) "
+            "with null release_date passed validation because they are "
+            "in the documented KNOWN_UNMAPPED_CPI_MONTHS allowlist: "
+            f"{unmapped_months.dt.strftime('%Y-%m-%d').tolist()}"
+        )
+
+    if cpi_df[
+        "cpi_all_items"
+    ].isna().any():
+        missing_values = (
+            cpi_df["cpi_all_items"].isna().sum()
+        )
+
+        raise ValueError(
+            "The processed CPI dataset contains "
+            f"{missing_values} missing CPI value(s)."
+        )
+
+    if cpi_df[
+        "reference_month"
+    ].duplicated().any():
+        raise ValueError(
+            "Duplicate CPI reference months remain in "
+            "the processed dataset."
+        )
+
+    if cpi_df[
+        "release_date"
+    ].duplicated().any():
+        # NOTE: pandas treats multiple NaT values as "duplicates" of each
+        # other, so if both KNOWN_UNMAPPED_CPI_MONTHS rows are present
+        # this will always fire. That's expected and not a real
+        # duplicate-release-date problem -- check for genuine duplicate
+        # *dated* releases separately if that distinction ever matters.
+        print(
+            "\nWarning: Multiple CPI observations have "
+            "the same release date (or both have a null "
+            "release date from the documented known-gap months)."
+        )
+
+    dated_rows = cpi_df["release_date"].dropna()
+    if not dated_rows.is_monotonic_increasing:
+        raise ValueError(
+            "CPI release dates are not sorted in "
+            "ascending order."
+        )
+
+
+# ---------------------------------------------------------
+# 12. Display summary
+# ---------------------------------------------------------
+
+def display_summary(
+    cpi_df: pd.DataFrame,
+) -> None:
+    """
+    Print a summary of the processed CPI dataset.
+    """
+
+    print("\nFirst five rows:")
+    print(cpi_df.head())
+
+    print("\nLast five rows:")
+    print(cpi_df.tail())
+
+    print("\nDataset shape:")
+    print(cpi_df.shape)
+
+    print("\nColumns:")
+    print(list(cpi_df.columns))
+
+    print("\nReference-period range:")
+    print(
+        "Start:",
+        cpi_df["reference_month"].min(),
+    )
+    print(
+        "End:",
+        cpi_df["reference_month"].max(),
+    )
+
+    print("\nRelease-date range:")
+    print(
+        "Start:",
+        cpi_df["release_date"].min(),
+    )
+    print(
+        "End:",
+        cpi_df["release_date"].max(),
+    )
+
+    print("\nMissing values:")
+    print(cpi_df.isna().sum())
+
+
+# ---------------------------------------------------------
+# 13. Save processed CSV
+# ---------------------------------------------------------
+
+def save_processed_data(
+    cpi_df: pd.DataFrame,
+) -> Path:
+    """
+    Save the publication-date-aligned CPI dataset.
+    """
+
+    cpi_df.to_csv(
+        PROCESSED_FILE,
+        index=False,
+    )
+
+    print(
+        "\nProcessed Statistics Canada CPI CSV "
+        "saved to:"
+    )
+    print(PROCESSED_FILE)
+
+    return PROCESSED_FILE
+
+
+# ---------------------------------------------------------
+# 14. Reusable pipeline function
+# ---------------------------------------------------------
+
+def run(
+    use_cache: bool = False,
+    cache_file: Path | None = None,
+) -> pd.DataFrame:
+    """
+    Run the complete Statistics Canada CPI pipeline.
+
+    Parameters
+    ----------
+    use_cache:
+        When True, rebuild the processed CSV using cached raw
+        JSON rather than making a new API request.
+
+    cache_file:
+        Optional path to a specific cached raw JSON file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        CPI data aligned using publication dates.
+    """
+
+    pipeline_start = time.perf_counter()
+
+    print("\n" + "=" * 60)
+    print("STATISTICS CANADA CPI DATA INGESTION")
+    print("=" * 60)
+
+    if use_cache:
+
+        if cache_file is None:
+            raw_file = find_latest_cached_json()
+        else:
+            raw_file = Path(cache_file).resolve()
+
+            print(
+                "Using specified Statistics Canada cache:"
+            )
+            print(raw_file)
+
+    else:
+        raw_file = download_raw_data()
+
+    data = load_raw_json(raw_file)
+
+    cpi_df = create_cpi_dataframe(data)
+
+    release_df = load_release_date_mapping()
+
+    cpi_df = align_to_release_dates(
+        cpi_df,
+        release_df,
+    )
+
+    validate_dataframe(cpi_df)
+
+    display_summary(cpi_df)
+
+    save_processed_data(cpi_df)
+
+    elapsed_time = (
+        time.perf_counter()
+        - pipeline_start
+    )
+
+    print(
+        "\nStatistics Canada execution time: "
+        f"{elapsed_time:.2f} seconds"
+    )
+
+    print(
+        "\nStatistics Canada CPI pipeline "
+        "completed successfully."
+    )
+
+    return cpi_df
+
+
+# ---------------------------------------------------------
+# 15. Command-line arguments
+# ---------------------------------------------------------
+
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command-line arguments.
+    """
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Download and process Statistics Canada CPI data "
+            "using official publication-date alignment."
+        )
+    )
+
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help=(
+            "Rebuild statcan_cpi.csv from the latest cached "
+            "raw Statistics Canada JSON file."
+        ),
+    )
+
+    parser.add_argument(
+        "--cache-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a specific cached Statistics "
+            "Canada JSON file."
+        ),
+    )
+
+    return parser.parse_args()
+
+
+# ---------------------------------------------------------
+# 16. Script entry point
+# ---------------------------------------------------------
+
+if __name__ == "__main__":
+
+    arguments = parse_arguments()
+
+    if (
+        arguments.cache_file is not None
+        and not arguments.from_cache
+    ):
+        raise ValueError(
+            "--cache-file must be used together with "
+            "--from-cache."
+        )
+
+    run(
+        use_cache=arguments.from_cache,
+        cache_file=arguments.cache_file,
+    )
