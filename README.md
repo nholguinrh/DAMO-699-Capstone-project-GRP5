@@ -94,6 +94,8 @@ This is how we work — read this before contributing.
 - **Team Charter (Social Contract):** [./TEAM_CHARTER.md](./TEAM_CHARTER.md) — 🚧 in progress
 - **Schedule:** [./TIMELINE.md](./TIMELINE.md) — 🚧 in progress
 - **Environment & API Setup:** [./docs/SETUP.md](./docs/SETUP.md) — API credentials and local setup
+- **Data Pipeline Setup:** [./DATA_PIPELINE_SETUP.md](./DATA_PIPELINE_SETUP.md) — clean clone to a
+  running `01_eda` notebook, Path A vs. Path B, local or Colab
 - **Backlog:** [GitHub Project board](https://github.com/users/nholguinrh/projects/6)
 
 ## Milestones
