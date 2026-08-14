@@ -1,24 +1,9 @@
 # SPRINT_AUG21_RECOVERY.md — M2 Closeout + Proposal-Gap Recovery Sprint
 
-> **This file does not override `TIMELINE.md`.** `TIMELINE.md` remains the single source of truth
-> for milestone dates (Standing Rule per `TIMELINE.md` §10.4 applies here too). This is a
-> supplementary execution plan that sequences work already implied by `TIMELINE.md` Week 6–7 and
-> `M2_CHECKLIST.md`, plus six proposal commitments that have no line item in either — see
-> "Where this came from" below. If a date here ever conflicts with `TIMELINE.md`, `TIMELINE.md`
-> wins; fix this file, not the other way around.
->
-> **Target: every item below closed by Fri Aug 21** (end of `TIMELINE.md` Week 7). Status legend
-> matches `TIMELINE.md`: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked/at risk.
-
 **Baseline date:** Fri Aug 14, 2026 (M2's own, already-once-revised due date).
 
-**Honest risk flag before anything else:** this compresses M2's unfinished third of the checklist
-*and* six previously-untracked proposal-methodology items into 8 days, on top of `TIMELINE.md`'s
-own description of this same week as already "the heavy week." Owner assignments below are best
-guesses from the M2 parallel-track split and proposal section ownership, not confirmed
-availability — flag anything wrong at the Aug 14 sync. If real slippage shows up, follow
-`TIMELINE.md` Standing Rule 3: label `blocked`, raise at standup, re-plan same day — don't let it
-erode Week 8's report-writing time silently.
+**Risk flag before anything else:** this compresses M2's unfinished third of the checklist *and* six previously-untracked proposal-methodology items into 8 days, on top of `TIMELINE.md`'s
+own description of this same week as already "the heavy week.". Fag anything wrong at the Aug 14 sync. If real slippage shows up, follow `TIMELINE.md` Standing Rule 3: label `blocked`, raise at standup, re-plan same day — don't let it erode Week 8's report-writing time silently.
 
 ---
 
@@ -38,10 +23,6 @@ erode Week 8's report-writing time silently.
 | Diebold-Mariano significance testing | `[ ]` not scheduled anywhere | Committed in §5.4 and §7; not named under Wk7 "diagnostics" |
 | TCPS 2 certification (all members) | `[ ]` not scheduled anywhere | Committed in §8; only the *section draft* is in `TIMELINE.md`, not the actual certification |
 | Final executive Power BI dashboard (model forecasts) | `[ ]` not scheduled anywhere | Committed in §6/§7 as a Wk9–10 deliverable distinct from the Round 2 EDA dashboard |
-| Governance docs (`TIMELINE.md`, `M2_CHECKLIST.md`) | `[!]` at risk | Aug 09 sync decisions are edited locally on `artifact/m2-round2a-eda-python` but **uncommitted, unpushed** — not yet true in `main` |
-| `data/README.md` data dictionary | `[!]` at risk | 1 `TBD` row remains |
-| `README.md` "Roadmap at a Glance" | `[!]` at risk | Still says "Phase 0 (Setup)" |
-| PR #39 (§3 refinement, closes #22) | `[!]` stale | Open since Aug 5, mergeable, zero reviews — not sprint-blocking but should not be forgotten |
 
 ## 2. Where the six methodology gaps came from
 
