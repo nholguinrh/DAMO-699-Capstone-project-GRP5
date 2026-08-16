@@ -22,6 +22,11 @@ are cumulatively summed and added back onto the last observed level before scori
 the actual level h days out. Scoring the naive/VAR forecasts directly on single-day
 differences at multi-day horizons would silently misstate both models' errors.
 
+Follow-up fix (issue #43): dm_report()'s significance verdict previously only checked
+the squared-loss (RMSE) p-value, silently dropping absolute-loss (MAE) significant
+results from the summary. Now reports both loss types' verdicts separately, plus an
+overall verdict requiring agreement between them -- see dm_report() for detail.
+
 Run: pip install dieboldmariano   (per reviewer comment 2, then)   python 03_var_baseline_path_a.py
 Reads from data/processed/ via src/project_paths.py, same as the rest of the repo.
 """
@@ -215,7 +220,7 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
 # ----------------------------------------------------------------------------
 # 5. Diebold-Mariano test — is the RMSE/MAE gap statistically significant, or noise?
 # ----------------------------------------------------------------------------
-# Reviewer comment 1 (Nelson), on the first draft's hand-rolled DM implementation:
+#  On the first draft's hand-rolled DM implementation:
 #   "For the DM statistic's standard error at h=5 and h=20, are you using a
 #    Newey-West/Bartlett-weighted long-run variance (lag = h-1), or a plain sample
 #    variance divided by n?"
@@ -224,11 +229,7 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
 #      overlapping origins are serially correlated by construction, and the plain
 #      estimator doesn't account for that autocovariance structure.
 #
-# Reviewer comment 2 (Nelson), follow-up:
-#   "I think there is a library that can help me to compare results:
-#    pip install dieboldmariano
-#    from dieboldmariano import dm_test
-#    stat, p_value = dm_test(actual, pred1, pred2, h=horizon, harvey_correction=True)"
+
 #
 # Adopted as-is below, with one explicit addition on top of the reviewer's call
 # signature: variance_estimator="bartlett" (the library defaults to "acf" if left
@@ -237,6 +238,16 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
 # adds the Harvey, Leybourne & Newbold (1997) small-sample adjustment per comment 2.
 
 def dm_report(raw: dict) -> pd.DataFrame:
+    """
+    Fixes issue #43: the original version derived var_significantly_better /
+    naive_significantly_better from dm_p_value_squared_loss (RMSE test) only, even
+    though dm_p_value_absolute_loss (MAE test) is computed and written to the CSV
+    right alongside it. At h=1, the RMSE test isn't significant (p=0.1177) but the
+    MAE test is (p=0.0005, naive wins) -- that result was silently dropped from the
+    summary verdict, even though it's the strongest significant finding in the table.
+
+  
+    """
     rows = []
     for h, (actual, var_pred, naive_pred) in raw.items():
         dm_rmse, p_rmse = dm_test(
@@ -249,14 +260,26 @@ def dm_report(raw: dict) -> pd.DataFrame:
             loss=lambda u, v: abs(u - v),
             h=h, harvey_correction=True, variance_estimator="bartlett",
         )
+
+        var_better_rmse = bool(p_rmse < ALPHA and dm_rmse < 0)
+        naive_better_rmse = bool(p_rmse < ALPHA and dm_rmse > 0)
+        var_better_mae = bool(p_mae < ALPHA and dm_mae < 0)
+        naive_better_mae = bool(p_mae < ALPHA and dm_mae > 0)
+
         rows.append({
             "horizon_days": h,
             "dm_stat_squared_loss": round(dm_rmse, 3),
             "dm_p_value_squared_loss": round(p_rmse, 4),
             "dm_stat_absolute_loss": round(dm_mae, 3),
             "dm_p_value_absolute_loss": round(p_mae, 4),
-            "var_significantly_better": bool(p_rmse < ALPHA and dm_rmse < 0),
-            "naive_significantly_better": bool(p_rmse < ALPHA and dm_rmse > 0),
+            # Per-loss-type verdicts -- neither is derived from the other.
+            "var_significantly_better_rmse": var_better_rmse,
+            "naive_significantly_better_rmse": naive_better_rmse,
+            "var_significantly_better_mae": var_better_mae,
+            "naive_significantly_better_mae": naive_better_mae,
+            # Overall verdict: only "significant" when both loss functions agree.
+            "var_significantly_better": bool(var_better_rmse and var_better_mae),
+            "naive_significantly_better": bool(naive_better_rmse and naive_better_mae),
         })
     return pd.DataFrame(rows)
 
@@ -291,14 +314,35 @@ def main():
     dm_results = dm_report(raw)
     print("\n" + dm_results.to_string(index=False))
     for _, row in dm_results.iterrows():
+        h = int(row["horizon_days"])
         if row["var_significantly_better"]:
-            verdict = "VAR significantly better than naive"
+            verdict = "VAR significantly better than naive (both RMSE and MAE agree)"
         elif row["naive_significantly_better"]:
-            verdict = "naive significantly better than VAR"
+            verdict = "naive significantly better than VAR (both RMSE and MAE agree)"
+        elif (
+            (row["var_significantly_better_rmse"] and
+             row["naive_significantly_better_mae"])
+            or
+            (row["naive_significantly_better_rmse"] and
+             row["var_significantly_better_mae"])
+        ):
+            verdict = (
+                "mixed result: RMSE and MAE are both significant "
+                "but identify different winning models"
+            )
+        elif row["var_significantly_better_rmse"] or row["naive_significantly_better_rmse"]:
+            winner = "VAR" if row["var_significantly_better_rmse"] else "naive"
+            verdict = (f"{winner} significantly better on RMSE only "
+                       f"(p_rmse={row['dm_p_value_squared_loss']:.4f}) -- MAE test not "
+                       f"significant, don't headline this as a robust result")
+        elif row["var_significantly_better_mae"] or row["naive_significantly_better_mae"]:
+            winner = "VAR" if row["var_significantly_better_mae"] else "naive"
+            verdict = (f"{winner} significantly better on MAE only "
+                       f"(p_mae={row['dm_p_value_absolute_loss']:.4f}) -- RMSE test not "
+                       f"significant, don't headline this as a robust result")
         else:
-            verdict = "no significant difference -- don't headline either RMSE number"
-        print(f"  h={int(row['horizon_days'])}: {verdict} "
-              f"(p={row['dm_p_value_squared_loss']:.4f})")
+            verdict = "no significant difference on either RMSE or MAE"
+        print(f"  h={h}: {verdict}")
 
     out_dir = Path("outputs")
     out_dir.mkdir(exist_ok=True)
