@@ -52,28 +52,57 @@ always checking each other.
 
 ## Convergence decisions (fill in as each round concludes — Week 4–5 team syncs)
 
-**Round 1 — Data collection:** chosen path — _TBD_. Rationale — _TBD_.
+**Round 1 — Data collection:** chosen path — **Giti's sequential/synchronous pull (Path A)**.
+Rationale — decided at Aug 09 team sync. Lerneir's concurrent-client path (Path B) shipped and
+works, but its follow-up fix (`#37`, FRED key leaking into retry logs + dead StatCan URL) is
+unresolved; rather than block on it, the team is proceeding on Path A and moving `#37` to the
+backlog since nothing is currently building on top of Path B.
 
-**Round 2 — EDA:** chosen approach — _TBD_ (or: keeping both, Python as reproducible record /
-Power BI as dashboard). Rationale — _TBD_.
+**Round 2 — EDA:** chosen approach — **keeping both**, Python (`01_eda`, Nelson, `#26`) as
+reproducible record / Power BI (Mitchel, `#27`) as dashboard. Rationale — decided at Aug 09 team
+sync: `#27` reviewed and approved; the two approaches are complementary by design per this
+document's own §"Why these specific technical forks", so no elimination was needed.
 
-**Round 3 — Baseline models:** chosen lag-order criterion — _TBD_ (or: keeping both as a
-sensitivity check). Rationale — _TBD_.
+**Round 3 — Baseline models:** chosen lag-order criterion — **keeping both as a documented
+sensitivity check**, not picking a winner. Rationale — reviewed both Aug 16: AIC (`#28`, lag=10,
+5-var feature set) and BIC (`#29`, lag=0, 6-var feature set incl. `usdcad`) agree on the finding
+that actually matters — **VAR does not beat the naive random-walk benchmark at any of the 1-/5-/
+20-day horizons, under either lag-order criterion.** AIC's own Diebold-Mariano test finds naive
+*significantly* better at h=1 on MAE (p=0.0005); no horizon or loss function ever favors VAR.
+BIC's RMSE/MAE are numerically close to naive throughout (BIC selected lag 0, effectively a
+constant-drift model), though no DM significance test was run on that path to confirm the gap
+isn't noise.
+
+Not treating this as a clean AIC-vs-BIC horse race, because the two runs aren't a controlled
+comparison as executed: AIC's script (`#28`/PR #42) used a 5-variable feature set with no
+`usdcad`; BIC's notebook (`#29`/PR #45) labels its 6-variable set (incl. `usdcad`) as "the common
+Round 3 feature set" but it isn't the one AIC actually used, and the two runs land on different
+modeling-sample sizes as a result. So "BIC selected a shorter lag" and "BIC's numbers are closer
+to naive" are confounded with "BIC's run also had an extra input variable" — can't currently
+attribute the difference to the lag-order criterion alone.
+
+Given both paths already converge on the substantive answer (VAR ≤ naive baseline here), re-running
+either to remove the confound isn't worth blocking Round 3 on — flagging it instead as a caveat for
+whoever cites this comparison later, and as a strong reason the naive floor and the upcoming LSTM
+(`#49`) — not VAR/VECM — carry the real forecasting-improvement question forward. Two open items
+before `#28`/`#29` can close: PR #45 (BIC) is still unmerged and unreviewed by Lerneir per the
+reviewer pairing, and it has no Diebold-Mariano significance test — add one before treating its
+RMSE/MAE gaps as anything other than descriptive. Carries into Week 6 per `TIMELINE.md` §6.
 
 ## Definition of done
 
-- [ ] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
+- [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
       concurrent client classes) before either was picked — not one built and the other skipped
-- [ ] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
+- [x] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
       produces everything in `data/processed/` using the chosen (or merged) path
 - [ ] `data/README.md` data dictionary reflects every column actually in `data/processed/` (no
       `TBD` rows left for columns that exist)
-- [ ] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
+- [x] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
       exploration), each built from whichever Round 1 output that analyst independently judged best
-- [ ] Round 2 decision recorded above
-- [ ] Round 3 shipped two independent baseline notebooks (AIC-lag VAR, BIC-lag VAR), both compared
+- [x] Round 2 decision recorded above
+- [x] Round 3 shipped two independent baseline notebooks (AIC-lag VAR, BIC-lag VAR), both compared
       against the shared Random Walk benchmark
-- [ ] Round 3 decision recorded above
+- [x] Round 3 decision recorded above
 - [ ] Feature engineering (Lerneir) consolidates a single Gold-layer pipeline in `src/` informed by
       both EDA approaches and both baseline attempts — not a third independent attempt
 - [ ] Outcome/early-results plan (Nelson) is a short, honest account of what converged and what's
