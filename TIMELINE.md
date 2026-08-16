@@ -93,11 +93,17 @@ that sync:
 - **Round 2 (EDA) — keeping both.** Mitchel's Power BI dashboard (`#27`) reviewed and approved
   alongside Nelson's Python notebook (`#26`) — reproducible record + stakeholder dashboard, per
   the parallel-track model's own rationale for this round.
-- Round 3 (baseline models) decision still open — carries into Week 6.
+- **Round 3 (baseline models) — keeping both as a sensitivity check, no lag-order winner
+  declared.** AIC (`#28`, lag=10) and BIC (`#29`, lag=0) both show VAR failing to beat the naive
+  random-walk benchmark at 1-/5-/20-day horizons; AIC's Diebold-Mariano test even finds naive
+  significantly better at h=1 (MAE, p=0.0005). The two runs used different feature sets (BIC's
+  notebook includes `usdcad`, AIC's script doesn't) so a clean AIC-vs-BIC verdict isn't possible
+  from this data — recorded as a caveat in `M2_CHECKLIST.md` rather than blocking on a rerun,
+  since both already agree VAR ≤ naive here regardless of lag criterion.
 
 Remaining Week 6 (Aug 10–14) work:
 
-- `[ ]` Round 3 baseline models converge (AIC vs. BIC lag order, or keep both) — Giti, Mitchel
+- `[x]` Round 3 baseline models converge (AIC vs. BIC lag order, or keep both) — Giti, Mitchel
 - `[ ]` Feature engineering: consolidated Gold-layer pipeline — Lerneir
 - `[ ]` Outcome / early-results plan — Nelson
 - `[ ]` Repo visibly shows: preprocessing, feature engineering, baseline models, early results (Student Guide Wk 5 list) — All
