@@ -52,25 +52,31 @@ always checking each other.
 
 ## Convergence decisions (fill in as each round concludes — Week 4–5 team syncs)
 
-**Round 1 — Data collection:** chosen path — _TBD_. Rationale — _TBD_.
+**Round 1 — Data collection:** chosen path — **Giti's sequential/synchronous pull (Path A)**.
+Rationale — decided at Aug 09 team sync. Lerneir's concurrent-client path (Path B) shipped and
+works, but its follow-up fix (`#37`, FRED key leaking into retry logs + dead StatCan URL) is
+unresolved; rather than block on it, the team is proceeding on Path A and moving `#37` to the
+backlog since nothing is currently building on top of Path B.
 
-**Round 2 — EDA:** chosen approach — _TBD_ (or: keeping both, Python as reproducible record /
-Power BI as dashboard). Rationale — _TBD_.
+**Round 2 — EDA:** chosen approach — **keeping both**, Python (`01_eda`, Nelson, `#26`) as
+reproducible record / Power BI (Mitchel, `#27`) as dashboard. Rationale — decided at Aug 09 team
+sync: `#27` reviewed and approved; the two approaches are complementary by design per this
+document's own §"Why these specific technical forks", so no elimination was needed.
 
 **Round 3 — Baseline models:** chosen lag-order criterion — _TBD_ (or: keeping both as a
-sensitivity check). Rationale — _TBD_.
+sensitivity check). Rationale — _TBD_. Carries into Week 6 per `TIMELINE.md` §6.
 
 ## Definition of done
 
-- [ ] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
+- [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
       concurrent client classes) before either was picked — not one built and the other skipped
-- [ ] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
+- [x] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
       produces everything in `data/processed/` using the chosen (or merged) path
 - [ ] `data/README.md` data dictionary reflects every column actually in `data/processed/` (no
       `TBD` rows left for columns that exist)
-- [ ] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
+- [x] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
       exploration), each built from whichever Round 1 output that analyst independently judged best
-- [ ] Round 2 decision recorded above
+- [x] Round 2 decision recorded above
 - [ ] Round 3 shipped two independent baseline notebooks (AIC-lag VAR, BIC-lag VAR), both compared
       against the shared Random Walk benchmark
 - [ ] Round 3 decision recorded above

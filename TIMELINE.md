@@ -3,6 +3,12 @@
 > **Doctrine:** This file defines all dates. The GitHub Projects Roadmap view mirrors it, never the reverse.
 > Any date change = commit to this file first → then "Sync the board".
 > Status legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked/at risk
+>
+> **Revision (Sun Aug 09):** Team sync decided to absorb the M2 slippage rather than let it
+> bleed into M3. M2's repo-checkpoint due date moves **Fri Aug 07 → Fri Aug 14** (§6); Week 6's
+> original modeling/report scope folds into Week 7 instead of getting its own week (§7). M1/M3/
+> M3b/M4/M5 graded dates are untouched. Same sync: Round 1 canonical path = sequential pull (§6
+> note); Round 2 keeps both EDA approaches (§6 note).
 
 **Team:** Giti · Mitchel · Lerneir · Nelson  | 
 **Repo:** https://github.com/nholguinrh/DAMO-699-Capstone-project-GRP5
@@ -15,7 +21,7 @@
 |---|-----------|-----|--------|--------------------|
 | M1 | Project Proposal | **Fri Jul 17** | 10% | Student Guide Wk 2; Instructions II; Proposal Template (≤5 pp) |
 | M1b | Proposal R&R (contingent) | Within **48h** of supervisor feedback (Wk 3) | — | Student Guide Wk 3 |
-| M2 | Preliminary analysis visible in repo | **Fri Aug 07** | supervisor review | Student Guide Wk 5 |
+| M2 | Preliminary analysis visible in repo | **Fri Aug 14** (revised Aug 09; was Fri Aug 07) | supervisor review | Student Guide Wk 5 |
 | M3 | Final Report + Dataset + full repo | **Sun Sep 13** | **60%** | Student Guide Wk 10; Instructions III |
 | M3b | Presentation deck submitted | **Wk 10 (by Sep 11)** | 10% (with discussion) | Presentation Strategies Assessments |
 | M4 | Poster presentation (poster to printer ≥2 business days prior; printer closed weekends) | **Wk 11, Sep 14–18** — exact session date **TBD** | (part of 10%) | Poster Instructions 5 & printing note |
@@ -74,19 +80,40 @@ Section ownership (3-3-4 split; each section reviewed by a different member):
 - `[ ]` Baseline/naïve model as benchmark — 
 - `[ ]` Supervisor touchpoint (optional per Student Guide Wk 4) — book only if scope questions remain
 
-## 6. Week 5 — Aug 03–07 · **M2: repo checkpoint Fri Aug 07**
+## 6. Week 5–6 — Aug 03–14 · **M2: repo checkpoint, revised → Fri Aug 14**
 
+Week 5 (Aug 03–07) ran long across the M2 parallel-track rounds; Aug 09 team sync moved the
+checkpoint into Week 6 rather than let it eat into Week 7's report work. Round decisions made at
+that sync:
+
+- **Round 1 (data collection) — chosen path: Giti's sequential/synchronous pull.** Lerneir's
+  concurrent-client path shipped too, but its follow-up fix (`#37` — FRED key leaking into retry
+  logs + dead StatCan URL) is deferred: moved to backlog rather than fixed now, since the team
+  isn't building further on that path.
+- **Round 2 (EDA) — keeping both.** Mitchel's Power BI dashboard (`#27`) reviewed and approved
+  alongside Nelson's Python notebook (`#26`) — reproducible record + stakeholder dashboard, per
+  the parallel-track model's own rationale for this round.
+- Round 3 (baseline models) decision still open — carries into Week 6.
+
+Remaining Week 6 (Aug 10–14) work:
+
+- `[ ]` Round 3 baseline models converge (AIC vs. BIC lag order, or keep both) — Giti, Mitchel
+- `[ ]` Feature engineering: consolidated Gold-layer pipeline — Lerneir
+- `[ ]` Outcome / early-results plan — Nelson
 - `[ ]` Repo visibly shows: preprocessing, feature engineering, baseline models, early results (Student Guide Wk 5 list) — All
 - `[ ]` README status section updated; notebooks run top-to-bottom — 
 - `[ ]` Attend second online class — All
 - `[ ]` Harvest supervisor feedback into issues within 24h — 
 
-## 7. Weeks 6–9 — Aug 10 – Sep 04 · Phase 3: modeling + report chapters
+## 7. Weeks 7–9 — Aug 17 – Sep 04 · Phase 3: modeling + report chapters
+
+Week 6's original scope (main models + chapters 02–03) folds into Week 7 below instead of taking
+its own week — the tradeoff for absorbing the M2 slip without moving M3 (Sun Sep 13, immovable).
+Week 7 is now the heavy week; watch it at daily standups per Standing Rule 3.
 
 Weekly rhythm (refine into daily rows at the start of each week):
 
-- **Wk 6 (Aug 10–14):** `[ ]` Author `final-report` skill —  · `[ ]` main models implemented —  · `[ ]` chapters 02–03 drafted — 
-- **Wk 7 (Aug 17–21):** `[ ]` Diagnostics + validation (VIF, fit tests, CV as applicable) —  · `[ ]` chapter 04 drafted —  · `[ ]` figure artifacts batch 1 (chart + APA caption + interpretation ¶ each) — 
+- **Wk 7 (Aug 17–21):** `[ ]` Author `final-report` skill —  · `[ ]` main models implemented —  · `[ ]` chapters 02–03 drafted —  · `[ ]` Diagnostics + validation (VIF, fit tests, CV as applicable) —  · `[ ]` chapter 04 drafted —  · `[ ]` figure artifacts batch 1 (chart + APA caption + interpretation ¶ each) — 
 - **Wk 8 (Aug 24–28):** `[ ]` chapter 05 (analytics application) —  · `[ ]` chapter 06 (findings & discussion) —  · `[ ]` figure batch 2 — 
 - **Wk 9 (Aug 31–Sep 04):** `[ ]` chapter 07 (conclusion & recommendations) —  · `[ ]` chapters 08–09 (references, appendices) —  · `[ ]` **chapter 01 executive summary — written LAST, starts only when 02–07 merged** —  · `[ ]` all chapters through rubric gate
 
