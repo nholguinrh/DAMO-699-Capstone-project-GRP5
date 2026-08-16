@@ -1,0 +1,4 @@
+horizon_days,dm_stat_squared_loss,dm_p_value_squared_loss,dm_stat_absolute_loss,dm_p_value_absolute_loss,var_significantly_better_rmse,naive_significantly_better_rmse,var_significantly_better_mae,naive_significantly_better_mae,var_significantly_better,naive_significantly_better
+1,0.854,0.3935,3.651,0.0003,False,False,False,True,False,False
+5,1.287,0.1985,0.954,0.3406,False,False,False,False,False,False
+20,1.312,0.1899,1.298,0.1947,False,False,False,False,False,False
