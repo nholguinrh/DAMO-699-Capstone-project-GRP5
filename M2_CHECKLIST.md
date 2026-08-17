@@ -95,7 +95,7 @@ RMSE/MAE gaps as anything other than descriptive. Carries into Week 6 per `TIMEL
       concurrent client classes) before either was picked — not one built and the other skipped
 - [x] Round 1 decision recorded above; `notebooks/02_cleaning` runs top-to-bottom from raw and
       produces everything in `data/processed/` using the chosen (or merged) path
-- [ ] `data/README.md` data dictionary reflects every column actually in `data/processed/` (no
+- [x] `data/README.md` data dictionary reflects every column actually in `data/processed/` (no
       `TBD` rows left for columns that exist)
 - [x] Round 2 shipped two independent EDA artifacts (Nelson's `01_eda` notebook, Mitchel's Power BI
       exploration), each built from whichever Round 1 output that analyst independently judged best
@@ -103,7 +103,7 @@ RMSE/MAE gaps as anything other than descriptive. Carries into Week 6 per `TIMEL
 - [x] Round 3 shipped two independent baseline notebooks (AIC-lag VAR, BIC-lag VAR), both compared
       against the shared Random Walk benchmark
 - [x] Round 3 decision recorded above
-- [ ] Feature engineering (Lerneir) consolidates a single Gold-layer pipeline in `src/` informed by
+- [x] Feature engineering (Lerneir) consolidates a single Gold-layer pipeline in `src/` informed by
       both EDA approaches and both baseline attempts — not a third independent attempt
 - [ ] Outcome/early-results plan (Nelson) is a short, honest account of what converged and what's
       still open, not a polished narrative that hides the rounds that didn't get a full answer

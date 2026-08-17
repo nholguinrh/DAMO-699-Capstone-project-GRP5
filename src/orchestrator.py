@@ -126,3 +126,13 @@ def run_full_collection(
         )
 
     return results
+
+
+def run_gold_pipeline() -> Any:
+    """Consolidate raw/processed data into canonical Gold-layer feature dataset."""
+    from src.gold_feature_pipeline import build_gold_features
+    logger.info("Starting Gold feature engineering pipeline...")
+    df_gold = build_gold_features()
+    logger.info("✓ Gold feature pipeline complete (%d rows, %d columns).", len(df_gold), len(df_gold.columns))
+    return df_gold
+
