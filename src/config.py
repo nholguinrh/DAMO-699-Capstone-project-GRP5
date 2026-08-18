@@ -67,9 +67,6 @@ FRED_SERIES = {
 # ── Statistics Canada — Web Data Service (no auth) ───────────────────────────
 # Docs: https://www.statcan.gc.ca/eng/developers/wds
 # Method: getDataFromVectorByReferencePeriodRange
-STATCAN_WDS_URL = (
-    "https://www150.statcan.gc.ca/t1/tbl1/en/dtl!downloadData"
-)
 STATCAN_WDS_VECTOR_URL = (
     "https://www150.statcan.gc.ca/t1/wds/rest/"
     "getDataFromVectorByReferencePeriodRange"
