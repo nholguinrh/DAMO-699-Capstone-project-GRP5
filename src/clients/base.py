@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -23,6 +24,18 @@ from typing import Any
 import requests
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_PARAM_REGEX = re.compile(
+    r"((?:api_key|apikey|key|token|secret|password)=)[^\s&\"']+",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_log_str(text: Any) -> str:
+    """Redact sensitive query parameters (e.g. api_key=...) from log text."""
+    if text is None:
+        return ""
+    return _SENSITIVE_PARAM_REGEX.sub(r"\1***REDACTED***", str(text))
 
 
 class BaseClient(ABC):
@@ -66,6 +79,7 @@ class BaseClient(ABC):
         backoff = self.INITIAL_BACKOFF_S
 
         for attempt in range(1, self.MAX_RETRIES + 1):
+            resp: requests.Response | None = None
             try:
                 resp = self._session.request(method, url, params=params,
                                              timeout=60)
@@ -75,6 +89,7 @@ class BaseClient(ABC):
                     return resp
 
                 # Retryable status — log and wait
+                safe_url = _sanitize_log_str(resp.url)
                 logger.warning(
                     "[%s] HTTP %s on attempt %d/%d for %s — "
                     "retrying in %.1fs",
@@ -82,23 +97,28 @@ class BaseClient(ABC):
                     resp.status_code,
                     attempt,
                     self.MAX_RETRIES,
-                    url,
+                    safe_url,
                     backoff,
                 )
             except requests.ConnectionError as exc:
+                safe_url = _sanitize_log_str(url)
+                safe_exc = _sanitize_log_str(exc)
                 logger.warning(
                     "[%s] Connection error on attempt %d/%d for %s: %s",
                     self.source_name,
                     attempt,
                     self.MAX_RETRIES,
-                    url,
-                    exc,
+                    safe_url,
+                    safe_exc,
                 )
 
             if attempt == self.MAX_RETRIES:
+                display_url = _sanitize_log_str(
+                    resp.url if resp is not None else url
+                )
                 msg = (
                     f"[{self.source_name}] All {self.MAX_RETRIES} retries "
-                    f"exhausted for {url}"
+                    f"exhausted for {display_url}"
                 )
                 logger.error(msg)
                 raise requests.HTTPError(msg)
