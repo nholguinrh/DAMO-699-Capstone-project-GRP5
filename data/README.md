@@ -1,20 +1,50 @@
 # Data
 
 - `raw/` — original, unmodified source datasets as obtained.
-- `processed/` — cleaned and preprocessed datasets ready for analysis.
+- `processed/` — cleaned and preprocessed datasets ready for analysis, including the canonical `gold_features.csv`.
 
 ## Setup & API Credentials
 
 For instructions on setting up API credentials (`.env`) and running the data collection pipeline, see [`docs/SETUP.md`](../docs/SETUP.md).
 
+## Gold-Layer Feature Pipeline Execution
+
+The Gold-layer feature pipeline consolidates processed Bank of Canada, FRED, and StatCan datasets into `data/processed/gold_features.csv`.
+
+To generate or refresh the Gold-layer feature dataset:
+
+```bash
+# Option 1: Via Orchestrator CLI
+python src/orchestrator.py --gold-only
+
+# Option 2: Direct script execution
+python src/gold_feature_pipeline.py
+```
+
+### Feature Selection & Subsetting (`feature_type`)
+
+`src/gold_feature_pipeline.py` supports a `feature_type` parameter to prevent multicollinearity between raw level series and first differences:
+
+```python
+from src.gold_feature_pipeline import build_gold_features
+
+# All features (levels + first differences)
+df_all = build_gold_features(feature_type="all")
+
+# Level series only (for VECM, cointegration tests, EDA)
+df_levels = build_gold_features(feature_type="levels")
+
+# Stationary first differences only (d_*) (for VAR, ARIMA, stationary LSTM)
+df_stationary = build_gold_features(feature_type="stationary")
+```
 
 ## Data dictionary
 
-<!-- Placeholder. One row per variable, filled in once the dataset is chosen. -->
+> **Note on Market Calendar Alignment:** `gold_features.csv` uses an `outer` merge between Bank of Canada and US FRED business day calendars. Single-day market holiday discrepancies (e.g. US MLK Day vs. Canadian Victoria Day) are forward-filled (`limit=2`) to preserve cross-border trading continuity without dropping valid trading observations.
 
 | Variable | Type | Description | Units / Values | Source |
 | -------- | ---- | ----------- | -------------- | ------ |
-| `date` | Date | Business day timestamp (YYYY-MM-DD) | Date | Bank of Canada / FRED trading calendar |
+| `date` | Date | Business day timestamp (YYYY-MM-DD) | Date | Bank of Canada / FRED trading calendar (outer merge) |
 | `overnight_rate` | Float | Bank of Canada key policy overnight interest rate | Percent (%) | Bank of Canada (Valet API) |
 | `yield_2y` | Float | Canadian Benchmark Bond Yield (2-Year) | Percent (%) | Bank of Canada (Valet API) |
 | `yield_3y` | Float | Canadian Benchmark Bond Yield (3-Year) | Percent (%) | Bank of Canada (Valet API) |
@@ -52,3 +82,4 @@ Format:
 Example:
 
 > Statistics Canada. (2023). *Consumer Trends Dataset, 2022* [Data set]. Government of Canada. https://doi.org/xxxxx
+
