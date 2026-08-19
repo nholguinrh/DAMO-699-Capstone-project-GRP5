@@ -1,0 +1,4 @@
+model,horizon_days,dm_stat_squared_loss,dm_p_value_squared_loss,dm_stat_absolute_loss,dm_p_value_absolute_loss
+lstm,1,1.4753807,0.14019412,7.6206927,3.1807988e-14
+lstm,5,0.79568607,0.42630666,0.7833905,0.4334591
+lstm,20,1.1281041,0.25933927,0.7661663,0.44362873

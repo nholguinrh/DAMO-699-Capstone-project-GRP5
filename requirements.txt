@@ -1,0 +1,34 @@
+# DAMO-699 Capstone (Group 5) -- Python dependencies for src/, notebooks/, and tests/.
+# Installed with `pip install -r requirements.txt`. Versions pinned with `==` were verified
+# running in this repo (gold-layer pipeline, ARIMA/VAR baselines, LSTM+SHAP, test suite);
+# versions pinned with `>=` (data-collection / plotting libs) are floors, not verified here.
+
+# Data collection (src/*_data_ingestion.py, DATA_PIPELINE_SETUP.md)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pdfplumber>=0.10.0
+python-dotenv>=1.0.0
+
+# Data handling
+pandas==3.0.5
+numpy==2.4.6
+
+# Notebook interface (see DATA_PIPELINE_SETUP.md -- `jupyter lab`, not `jupyter notebook`)
+jupyterlab>=4.0.0
+ipykernel>=7.3.0
+
+# EDA / plotting (notebooks/01_eda)
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Baseline models (notebooks/03_models, src/gold_feature_pipeline.py)
+statsmodels==0.14.6
+scikit-learn==1.9.0
+dieboldmariano==1.1.0
+
+# LSTM baseline + SHAP interpretability (Issue #49)
+torch==2.13.0
+shap==0.52.0
+
+# Tests
+pytest==9.1.1
