@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 def build_gold_features(
     output_path: Path | None = None,
+    boc_path: Path | None = None,
+    fred_path: Path | None = None,
+    cpi_path: Path | None = None,
     save: bool = True,
     feature_type: str = "all",
 ) -> pd.DataFrame:
@@ -40,6 +43,12 @@ def build_gold_features(
     ----------
     output_path : Path, optional
         Path to save the resulting CSV. Defaults to `data/processed/gold_features.csv`.
+    boc_path : Path, optional
+        Path to Bank of Canada CSV input. Defaults to `data/processed/bank_of_canada_data.csv`.
+    fred_path : Path, optional
+        Path to FRED CSV input. Defaults to `data/processed/fred_rates.csv`.
+    cpi_path : Path, optional
+        Path to StatCan CPI CSV input. Defaults to `data/processed/statcan_cpi.csv`.
     save : bool, default True
         Whether to write the resulting DataFrame to disk.
     feature_type : {"all", "levels", "stationary"}, default "all"
@@ -62,9 +71,9 @@ def build_gold_features(
         )
 
     # 1. Load silver/processed input datasets
-    boc_file = PROCESSED_DIR / "bank_of_canada_data.csv"
-    fred_file = PROCESSED_DIR / "fred_rates.csv"
-    cpi_file = PROCESSED_DIR / "statcan_cpi.csv"
+    boc_file = boc_path if boc_path is not None else PROCESSED_DIR / "bank_of_canada_data.csv"
+    fred_file = fred_path if fred_path is not None else PROCESSED_DIR / "fred_rates.csv"
+    cpi_file = cpi_path if cpi_path is not None else PROCESSED_DIR / "statcan_cpi.csv"
 
     for file_path in [boc_file, fred_file, cpi_file]:
         if not file_path.exists():
@@ -107,7 +116,20 @@ def build_gold_features(
 
     # 4. Process StatCan CPI & calculate YoY percentage change
     cpi_sorted = cpi.sort_values("reference_month").copy()
-    cpi_sorted["cpi_yoy"] = cpi_sorted["cpi_all_items"].pct_change(12) * 100
+    cpi_sorted["reference_month"] = pd.to_datetime(cpi_sorted["reference_month"]).dt.to_period("M").dt.to_timestamp()
+
+    # Reindex onto full contiguous monthly grid to ensure 12-period lag is exactly 12 calendar months
+    full_month_range = pd.date_range(
+        cpi_sorted["reference_month"].min(), cpi_sorted["reference_month"].max(), freq="MS"
+    )
+    cpi_monthly = (
+        cpi_sorted.set_index("reference_month")
+        .reindex(full_month_range)
+    )
+    cpi_monthly["cpi_yoy"] = cpi_monthly["cpi_all_items"].pct_change(12) * 100
+
+    # Restore reference_month and drop unneeded empty grid rows
+    cpi_sorted = cpi_monthly.dropna(subset=["cpi_all_items"]).reset_index().rename(columns={"index": "reference_month"})
 
     # Drop rows without mapped release dates
     cpi_sorted = cpi_sorted.dropna(subset=["release_date"])

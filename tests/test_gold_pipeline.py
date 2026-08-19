@@ -16,17 +16,23 @@ from src.gold_feature_pipeline import build_gold_features
 from src.project_paths import PROCESSED_DIR
 
 
-def test_build_gold_features_execution(tmp_path: Path):
-    """Test that build_gold_features runs cleanly and generates expected CSV."""
+def test_build_gold_features_execution(tmp_path: Path, synthetic_gold_inputs: dict[str, Path]):
+    """Test that build_gold_features runs cleanly on synthetic data and generates expected CSV."""
     test_out = tmp_path / "test_gold_features.csv"
-    df = build_gold_features(output_path=test_out, save=True)
+    df = build_gold_features(
+        output_path=test_out,
+        boc_path=synthetic_gold_inputs["boc_path"],
+        fred_path=synthetic_gold_inputs["fred_path"],
+        cpi_path=synthetic_gold_inputs["cpi_path"],
+        save=True,
+    )
 
     # 1. Output file exists
     assert test_out.exists()
 
     # 2. DataFrame shape & types
     assert isinstance(df, pd.DataFrame)
-    assert len(df) > 3000  # Expected multi-year trading days
+    assert len(df) > 20  # Synthetic multi-period business days
 
     # 3. Required key target & feature columns present
     required_cols = [
@@ -57,13 +63,27 @@ def test_build_gold_features_execution(tmp_path: Path):
     assert df.index.is_monotonic_increasing, "Date index is not sorted monotonically"
 
 
-def test_feature_type_filtering(tmp_path: Path):
+def test_feature_type_filtering(tmp_path: Path, synthetic_gold_inputs: dict[str, Path]):
     """Test that feature_type parameter filters levels vs stationary columns correctly."""
     out_levels = tmp_path / "gold_levels.csv"
-    df_levels = build_gold_features(output_path=out_levels, save=True, feature_type="levels")
+    df_levels = build_gold_features(
+        output_path=out_levels,
+        boc_path=synthetic_gold_inputs["boc_path"],
+        fred_path=synthetic_gold_inputs["fred_path"],
+        cpi_path=synthetic_gold_inputs["cpi_path"],
+        save=True,
+        feature_type="levels",
+    )
 
     out_stat = tmp_path / "gold_stationary.csv"
-    df_stat = build_gold_features(output_path=out_stat, save=True, feature_type="stationary")
+    df_stat = build_gold_features(
+        output_path=out_stat,
+        boc_path=synthetic_gold_inputs["boc_path"],
+        fred_path=synthetic_gold_inputs["fred_path"],
+        cpi_path=synthetic_gold_inputs["cpi_path"],
+        save=True,
+        feature_type="stationary",
+    )
 
     # Levels should not contain differenced d_* features
     assert not any(c.startswith("d_") for c in df_levels.columns)
@@ -80,10 +100,12 @@ def test_invalid_feature_type_raises_value_error():
         build_gold_features(save=False, feature_type="invalid_option")
 
 
+@pytest.mark.integration
 def test_processed_gold_file_exists():
-    """Test that canonical data/processed/gold_features.csv exists and is readable."""
+    """Integration test: Verify canonical data/processed/gold_features.csv if present."""
     gold_file = PROCESSED_DIR / "gold_features.csv"
-    assert gold_file.exists(), "data/processed/gold_features.csv does not exist"
+    if not gold_file.exists():
+        pytest.skip("data/processed/gold_features.csv does not exist locally (requires data collection pipeline run)")
 
     df = pd.read_csv(gold_file, parse_dates=["date"], index_col="date")
     assert not df.empty
