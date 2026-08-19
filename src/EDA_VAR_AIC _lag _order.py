@@ -7,8 +7,15 @@ Scope of this script (per the issue #28 checklist, two boxes only):
     feature set
   - RMSE/MAE at 1-/5-/20-day horizons vs. the naive benchmark, per proposal §5.4
 
-Round 2-consolidated feature set (per the stationarity/redundancy memo):
-    yield_spread_10y_2y (target), overnight_rate, us_treasury_10y, fed_funds_rate, cpi_yoy
+Feature set (per proposal §3.1/§5.3's committed predictor set):
+    yield_spread_10y_2y (target), overnight_rate, us_treasury_10y, fed_funds_rate, cpi_yoy,
+    usdcad
+
+Aug 19 correction: `usdcad` had been left out of this script from the start (undocumented).
+#29 briefly matched that omission to keep the #28-vs-#29 AIC/BIC comparison controlled, which
+absorbed the gap as an accepted caveat in M2_CHECKLIST.md's Aug 16 decision instead of fixing
+it. §3.1's research question names USD/CAD explicitly as a required transmission variable, so
+it's restored here -- see M2_CHECKLIST.md's Aug 19 entry.
 
 Important methodological note on horizons:
 Proposal §5.4 defines the naive benchmark as "predicts tomorrow's [value] as today's
@@ -56,7 +63,7 @@ from project_paths import PROCESSED_DIR  # noqa: E402
 
 TARGET = "yield_spread_10y_2y"
 FEATURE_SET = ["yield_spread_10y_2y", "overnight_rate", "us_treasury_10y",
-               "fed_funds_rate", "cpi_yoy"]
+               "fed_funds_rate", "cpi_yoy", "usdcad"]
 
 HORIZONS = [1, 5, 20]     # trading days, per proposal §5.4
 MAX_LAG_SEARCH = 15
@@ -75,7 +82,7 @@ def load_levels() -> pd.DataFrame:
     cpi = pd.read_csv(PROCESSED_DIR / "statcan_cpi.csv",
                        parse_dates=["reference_month", "release_date"])
 
-    df = (boc[["date", "overnight_rate", "yield_spread_10y_2y"]]
+    df = (boc[["date", "overnight_rate", "yield_spread_10y_2y", "usdcad"]]
           .merge(fred[["date", "us_treasury_10y", "fed_funds_rate"]], on="date", how="inner")
           .sort_values("date")
           .set_index("date"))
@@ -120,7 +127,7 @@ def confirm_stationary(diffed: pd.DataFrame) -> None:
                 f"{col} is still non-stationary after one difference (p={pval:.3f}). "
                 f"Do not proceed to VAR fitting/select_order() until this is resolved."
             )
-    print("  All 5 series confirmed stationary post-differencing (p<0.05).")
+    print(f"  All {len(diffed.columns)} series confirmed stationary post-differencing (p<0.05).")
 
 
 # ----------------------------------------------------------------------------
