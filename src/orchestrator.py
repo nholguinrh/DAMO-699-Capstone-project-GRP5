@@ -17,10 +17,18 @@ Usage
 
 from __future__ import annotations
 
+import sys
 import logging
 import time
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
+
+# Ensure project root is on sys.path whether executed directly or as module
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from src import config as default_config
 from src.clients.boc_client import BoCClient
@@ -28,6 +36,7 @@ from src.clients.fred_client import FREDClient
 from src.clients.statcan_client import StatCanClient
 
 logger = logging.getLogger(__name__)
+
 
 
 def _fetch_boc(cfg: Any) -> dict[str, Any]:
@@ -126,3 +135,33 @@ def run_full_collection(
         )
 
     return results
+
+
+def run_gold_pipeline() -> Any:
+    """Consolidate raw/processed data into canonical Gold-layer feature dataset."""
+    from src.gold_feature_pipeline import build_gold_features
+    logger.info("Starting Gold feature engineering pipeline...")
+    df_gold = build_gold_features()
+    logger.info("✓ Gold feature pipeline complete (%d rows, %d columns).", len(df_gold), len(df_gold.columns))
+    return df_gold
+
+
+if __name__ == "__main__":
+    import argparse
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+    parser = argparse.ArgumentParser(description="Data collection & Gold pipeline orchestrator")
+    parser.add_argument("--gold-only", action="store_true", help="Run only the Gold feature engineering pipeline")
+    parser.add_argument("--full", action="store_true", help="Run full collection followed by Gold pipeline")
+    args = parser.parse_args()
+
+    if args.gold_only:
+        run_gold_pipeline()
+    elif args.full:
+        run_full_collection()
+        run_gold_pipeline()
+    else:
+        # Default behavior: run gold pipeline
+        run_gold_pipeline()
+
+
