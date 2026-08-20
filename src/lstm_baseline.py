@@ -134,6 +134,12 @@ def make_rolling_folds(n_windows: int, min_train: int = MIN_TRAIN, n_folds: int 
     """
     test_pool = n_windows - min_train
     fold_size = test_pool // n_folds
+    if fold_size < 1:
+        raise ValueError(
+            f"n_folds={n_folds} leaves a test pool of only {test_pool} windows "
+            f"(n_windows={n_windows}, min_train={min_train}) -- every fold but the "
+            "last would get zero test rows. Lower n_folds or min_train."
+        )
     folds = []
     for k in range(n_folds):
         train_end = min_train + k * fold_size
@@ -181,8 +187,38 @@ def _train_with_early_stopping(
             if no_improve >= patience:
                 break
 
+    if best_state is None:
+        # val_loss never beat the initial `inf` -- only possible if it was NaN/Inf
+        # on every epoch (a finite first-epoch loss always clears that bar). Fail
+        # loudly with a diagnosable cause rather than crashing on load_state_dict(None).
+        raise RuntimeError(
+            f"Training produced no valid checkpoint after {epochs_run} epoch(s): "
+            f"validation loss never improved from its initial value (last val_loss="
+            f"{val_loss!r}). This usually means a near-constant training column "
+            "collapsed the normalization std toward its epsilon floor -- check Xtr "
+            "for low-variance features in this fold/split."
+        )
+
     model.load_state_dict(best_state)
     return model, best_val, epochs_run
+
+
+def _normalize_and_train(Xtr, Ytr, Xval, Yval, n_features, seed, **train_kwargs):
+    """
+    Shared normalize-then-train step for `run_rolling_cv` (per fold) and
+    `train_final_model` (full sample) -- kept in one place so a future change to
+    the scaling convention or the early-stopping call can't drift between the two.
+    """
+    x_mean, x_std = Xtr.mean(axis=(0, 1)), Xtr.std(axis=(0, 1)) + 1e-8
+    y_mean, y_std = Ytr.mean(axis=0), Ytr.std(axis=0) + 1e-8
+
+    model, best_val, epochs_run = _train_with_early_stopping(
+        (Xtr - x_mean) / x_std, (Ytr - y_mean) / y_std,
+        (Xval - x_mean) / x_std, (Yval - y_mean) / y_std,
+        n_features=n_features, seed=seed, **train_kwargs,
+    )
+    scaling = {"x_mean": x_mean, "x_std": x_std, "y_mean": y_mean, "y_std": y_std}
+    return model, scaling, best_val, epochs_run
 
 
 def run_rolling_cv(
@@ -211,19 +247,24 @@ def run_rolling_cv(
     for fold_id, (train_end, test_end) in enumerate(folds):
         val_size = max(int(train_end * 0.15), min_val_size)
         tr_end = train_end - val_size
+        if tr_end <= 0:
+            raise ValueError(
+                f"Fold {fold_id}: min_val_size={min_val_size} leaves no training "
+                f"data (train_end={train_end}, val_size={val_size}). Lower "
+                "min_val_size or raise min_train/n_folds."
+            )
 
         Xtr, Ytr = X[:tr_end], Y[:tr_end]
         Xval, Yval = X[tr_end:train_end], Y[tr_end:train_end]
         Xte = X[train_end:test_end]
 
-        x_mean, x_std = Xtr.mean(axis=(0, 1)), Xtr.std(axis=(0, 1)) + 1e-8
-        y_mean, y_std = Ytr.mean(axis=0), Ytr.std(axis=0) + 1e-8
-
-        model, best_val, epochs_run = _train_with_early_stopping(
-            (Xtr - x_mean) / x_std, (Ytr - y_mean) / y_std,
-            (Xval - x_mean) / x_std, (Yval - y_mean) / y_std,
+        model, scaling, best_val, epochs_run = _normalize_and_train(
+            Xtr, Ytr, Xval, Yval,
             n_features=len(FEATURES), seed=SEED + fold_id,
             hidden_size=hidden_size, max_epochs=max_epochs, patience=patience,
+        )
+        x_mean, x_std, y_mean, y_std = (
+            scaling["x_mean"], scaling["x_std"], scaling["y_mean"], scaling["y_std"]
         )
 
         model.eval()
@@ -274,31 +315,56 @@ def train_final_model(
     Xtr, Ytr = X[:tr_end], Y[:tr_end]
     Xval, Yval = X[tr_end:], Y[tr_end:]
 
-    x_mean, x_std = Xtr.mean(axis=(0, 1)), Xtr.std(axis=(0, 1)) + 1e-8
-    y_mean, y_std = Ytr.mean(axis=0), Ytr.std(axis=0) + 1e-8
-
-    model, best_val, epochs_run = _train_with_early_stopping(
-        (Xtr - x_mean) / x_std, (Ytr - y_mean) / y_std,
-        (Xval - x_mean) / x_std, (Yval - y_mean) / y_std,
+    model, scaling, best_val, epochs_run = _normalize_and_train(
+        Xtr, Ytr, Xval, Yval,
         n_features=len(FEATURES), seed=seed,
         hidden_size=hidden_size, max_epochs=max_epochs, patience=patience,
     )
 
-    scaling = {"x_mean": x_mean, "x_std": x_std, "y_mean": y_mean, "y_std": y_std}
     return model, scaling, X, origin_idx, {"best_val_loss": best_val, "epochs_run": epochs_run}
 
 
 def save_final_model(model: nn.Module, scaling: dict, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state_dict": model.state_dict(), "scaling": scaling}, path)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            # Stored as tensors (not the raw numpy arrays `scaling` holds) so the
+            # whole checkpoint round-trips through torch.load(weights_only=True)
+            # below without needing to allowlist numpy's unpickler.
+            "scaling": {k: torch.as_tensor(np.asarray(v, dtype=np.float32)) for k, v in scaling.items()},
+            # Tags the checkpoint with the feature set it was trained on, so a
+            # future FEATURES change can't silently load stale weights under a
+            # mismatched feature list -- see load_final_model()'s check below.
+            "features": list(FEATURES),
+        },
+        path,
+    )
 
 
 def load_final_model(
     path: Path, n_features: int = len(FEATURES),
     hidden_size: int = HIDDEN_SIZE, n_outputs: int = len(HORIZONS),
 ):
-    checkpoint = torch.load(path, weights_only=False)
+    # weights_only=True: this checkpoint is committed to git and shared across the
+    # team, so we don't want full pickle deserialization (arbitrary code execution)
+    # to run against it -- everything saved above is a tensor, list[str], or dict,
+    # all supported under the safe unpickler.
+    checkpoint = torch.load(path, weights_only=True)
+
+    saved_features = checkpoint.get("features")
+    if saved_features is not None and list(saved_features) != list(FEATURES):
+        raise RuntimeError(
+            f"Checkpoint at {path} was trained on features {list(saved_features)}, "
+            f"but the current module FEATURES is {list(FEATURES)}. Re-run "
+            "notebooks/03_models/lstm_baseline.ipynb to regenerate the checkpoint "
+            "before loading it here -- loading it anyway would silently mislabel "
+            "SHAP attributions against the wrong features."
+        )
+
     model = ShallowLSTM(n_features=n_features, hidden_size=hidden_size, n_outputs=n_outputs)
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
-    return model, checkpoint["scaling"]
+
+    scaling = {k: v.numpy() for k, v in checkpoint["scaling"].items()}
+    return model, scaling

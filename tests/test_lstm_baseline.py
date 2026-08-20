@@ -137,6 +137,67 @@ def test_run_rolling_cv_smoke():
     assert (results_df["naive"] == results_df.groupby("origin_date")["naive"].transform("first")).all()
 
 
+def test_make_rolling_folds_rejects_undersized_test_pool():
+    # test_pool=10, n_folds=20 -> fold_size truncates to 0 via integer division;
+    # every fold but the last would silently get zero test rows (bug caught in
+    # review on PR #58) instead of raising.
+    with pytest.raises(ValueError, match="n_folds"):
+        make_rolling_folds(n_windows=110, min_train=100, n_folds=20)
+
+
+def test_run_rolling_cv_rejects_min_val_size_that_empties_training_set():
+    df = _make_synthetic_df(220, seed=1)
+
+    # min_val_size=100 on a fold with train_end=100 leaves tr_end<=0, which used
+    # to propagate as NaN into training instead of failing immediately.
+    with pytest.raises(ValueError, match="min_val_size"):
+        run_rolling_cv(
+            df,
+            lookback=5, horizons=[1, 2, 3],
+            min_train=100, n_folds=2,
+            hidden_size=4, max_epochs=3, patience=2, min_val_size=100,
+        )
+
+
+def test_train_with_early_stopping_raises_on_persistent_nan_val_loss():
+    # A model that always outputs NaN (forced via a NaN-filled validation set)
+    # never clears the `val_loss < best_val` bar, so best_state would stay None;
+    # this must raise a diagnosable RuntimeError instead of crashing inside
+    # load_state_dict(None) (bug caught in review on PR #58).
+    n_features, n_outputs = len(FEATURES), 3
+    Xtr = np.random.default_rng(0).normal(size=(20, 5, n_features)).astype(np.float32)
+    Ytr = np.random.default_rng(1).normal(size=(20, n_outputs)).astype(np.float32)
+    Xval = Xtr[:5].copy()
+    Yval = np.full((5, n_outputs), np.nan, dtype=np.float32)
+
+    from src.lstm_baseline import _train_with_early_stopping
+
+    with pytest.raises(RuntimeError, match="no valid checkpoint"):
+        _train_with_early_stopping(
+            Xtr, Ytr, Xval, Yval, n_features=n_features, seed=0,
+            hidden_size=4, max_epochs=3, patience=2,
+        )
+
+
+def test_load_final_model_rejects_mismatched_feature_set(tmp_path, monkeypatch):
+    df = _make_synthetic_df(150, seed=2)
+
+    model, scaling, X, origin_idx, diag = train_final_model(
+        df, val_frac=0.2,
+        lookback=5, horizons=[1, 2, 3],
+        hidden_size=4, max_epochs=3, patience=2,
+    )
+
+    model_path = tmp_path / "lstm_test_model.pt"
+    save_final_model(model, scaling, model_path)
+
+    import src.lstm_baseline as lstm_baseline_module
+    monkeypatch.setattr(lstm_baseline_module, "FEATURES", FEATURES[:-1] + ["some_other_feature"])
+
+    with pytest.raises(RuntimeError, match="was trained on features"):
+        load_final_model(model_path, n_features=len(FEATURES), hidden_size=4, n_outputs=3)
+
+
 def test_train_final_model_save_and_load_roundtrip(tmp_path):
     df = _make_synthetic_df(150, seed=2)
 
