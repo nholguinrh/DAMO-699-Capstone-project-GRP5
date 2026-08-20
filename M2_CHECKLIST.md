@@ -89,6 +89,32 @@ before `#28`/`#29` can close: PR #45 (BIC) is still unmerged and unreviewed by L
 reviewer pairing, and it has no Diebold-Mariano significance test — add one before treating its
 RMSE/MAE gaps as anything other than descriptive. Carries into Week 6 per `TIMELINE.md` §6.
 
+**Aug 19 correction — `usdcad` restored as a predictor across `#28`/`#29`/`#49`.** Supersedes the
+"5-var feature set" framing above. While building `#49`'s LSTM baseline, review against
+`proposal/sections/03_analytical_objective.md` §3.1 found that the research question explicitly
+names USD/CAD as a required "macroeconomic transmission variable" — it is a committed predictor,
+not an optional one, and §5.3 lists it as part of the VAR/VECM system. The 5-variable convergence
+described above was an undocumented omission in `#28`'s original script, not a reviewed
+methodological choice: `#29` originally had 6 variables (including `usdcad`), and the Aug 16 "fix"
+matched it *down* to `#28` to control the AIC-vs-BIC comparison, rather than adding `usdcad` to
+`#28` to match the proposal. EDA supports no exclusion either way — `usdcad` is I(1)/stationary
+after one difference, same as every other series (`notebooks/01_eda/eda.ipynb`, ADF table).
+
+Decision: restore `usdcad` as the 6th predictor everywhere. Applied Aug 19:
+- `#28` (`src/EDA_VAR_AIC _lag _order.py`): `FEATURE_SET` now includes `usdcad`; AIC-selected lag
+  order unchanged at 10; VAR still does not beat naive at any horizon.
+- `#29` (PR #45, merged Aug 19 on Lerneir's existing approval, then updated on
+  `artifact/m2-lstm-shap`): `FEATURES` now includes `usdcad`; BIC still selects lag 0.
+  RMSE/MAE/DM results are numerically unchanged from the 5-variable run, because a lag-0 VAR
+  reduces to a constant-drift model on the target's own history and never reads any regressor —
+  the fix corrects proposal alignment and #28/#29 comparability, not this particular result.
+- `#49` (`src/lstm_baseline.py`): `FEATURES` now includes `d_usdcad` from its first commit on
+  `artifact/m2-lstm-shap`, so the LSTM was proposal-correct from the start; SHAP puts `d_usdcad`
+  as the 2nd-most-important feature by mean |SHAP|, behind `d_us_treasury_10y`.
+
+All three models now share the same proposal-correct 6-variable feature set, which is what makes
+`#50`'s eventual pairwise Diebold-Mariano comparison across Naive/ARIMA/VAR/VECM/LSTM valid.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
