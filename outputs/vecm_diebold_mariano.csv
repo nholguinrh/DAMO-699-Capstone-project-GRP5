@@ -1,0 +1,7 @@
+system,horizon_days,dm_vecm_naive_stat_sq,dm_vecm_naive_p_sq,dm_vecm_naive_stat_abs,dm_vecm_naive_p_abs,vecm_sig_better_naive_rmse,naive_sig_better_vecm_rmse,vecm_sig_better_naive_mae,naive_sig_better_vecm_mae,dm_vecm_var_aic_stat_sq,dm_vecm_var_aic_p_sq,dm_vecm_var_aic_stat_abs,dm_vecm_var_aic_p_abs,vecm_sig_better_var_aic_rmse,var_aic_sig_better_vecm_rmse,vecm_sig_better_var_aic_mae,var_aic_sig_better_vecm_mae,dm_vecm_var_bic_stat_sq,dm_vecm_var_bic_p_sq,dm_vecm_var_bic_stat_abs,dm_vecm_var_bic_p_abs,vecm_sig_better_var_bic_rmse,var_bic_sig_better_vecm_rmse,vecm_sig_better_var_bic_mae,var_bic_sig_better_vecm_mae
+5var,1,3.214,0.0014,4.246,0.0,False,True,False,True,0.726,0.4681,1.561,0.1189,False,False,False,False,3.173,0.0016,3.95,0.0001,False,True,False,True
+5var,5,2.278,0.023,2.459,0.0141,False,True,False,True,-0.155,0.877,0.081,0.9351,False,False,False,False,2.144,0.0324,2.042,0.0415,False,True,False,True
+5var,20,-0.008,0.9936,0.237,0.813,False,False,False,False,-0.321,0.7483,-0.423,0.6724,False,False,False,False,-0.468,0.6396,-0.314,0.7538,False,False,False,False
+6var,1,2.427,0.0155,3.648,0.0003,False,True,False,True,-0.329,0.7423,-0.408,0.6833,False,False,False,False,2.384,0.0174,3.371,0.0008,False,True,False,True
+6var,5,2.217,0.0269,2.157,0.0313,False,True,False,True,-0.283,0.7772,-0.665,0.5063,False,False,False,False,2.096,0.0364,1.743,0.0817,False,True,False,False
+6var,20,-0.377,0.7064,-0.464,0.6431,False,False,False,False,-0.806,0.4205,-1.208,0.2273,False,False,False,False,-0.888,0.3751,-0.951,0.3419,False,False,False,False

@@ -1,0 +1,3 @@
+system,aic_lag_levels,k_ar_diff,aic_lag_diff,bic_lag_diff
+5var,11,10,11,0
+6var,11,10,10,0
