@@ -1,7 +1,7 @@
-system,horizon_days,n_forecasts,rmse_vecm,mae_vecm,rmse_var_aic,mae_var_aic,rmse_var_bic,mae_var_bic,rmse_naive,mae_naive,vecm_beats_naive_rmse,vecm_beats_naive_mae,vecm_beats_var_aic_rmse,vecm_beats_var_aic_mae
-5var,1,750,0.029879,0.021568,0.029806,0.021404,0.02901,0.020664,0.029001,0.020587,False,False,False,False
-5var,5,750,0.063771,0.048123,0.063842,0.048084,0.061354,0.046628,0.061161,0.046333,False,False,True,False
-5var,20,750,0.125032,0.094888,0.125838,0.095791,0.126534,0.095683,0.125057,0.094387,True,False,True,True
-6var,1,750,0.029729,0.021491,0.029757,0.021522,0.02901,0.020664,0.029001,0.020587,False,False,True,True
-6var,5,750,0.063507,0.04784,0.063621,0.048111,0.061354,0.046628,0.061161,0.046333,False,False,True,True
-6var,20,750,0.123891,0.093428,0.125712,0.09577,0.126534,0.095683,0.125057,0.094387,True,True,True,True
+system,horizon_days,n_forecasts,rmse_vecm,mae_vecm,rmse_var_aic,mae_var_aic,rmse_var_bic,mae_var_bic,rmse_naive,mae_naive,vecm_beats_naive_rmse,vecm_beats_naive_mae,vecm_beats_var_aic_rmse,vecm_beats_var_aic_mae,vecm_beats_var_bic_rmse,vecm_beats_var_bic_mae
+5var,1,750,0.029879,0.021568,0.029806,0.021404,0.02901,0.020664,0.029001,0.020587,False,False,False,False,False,False
+5var,5,750,0.063771,0.048123,0.063842,0.048084,0.061354,0.046628,0.061161,0.046333,False,False,True,False,False,False
+5var,20,750,0.125032,0.094888,0.125838,0.095791,0.126534,0.095683,0.125057,0.094387,True,False,True,True,True,True
+6var,1,750,0.029729,0.021491,0.029757,0.021522,0.02901,0.020664,0.029001,0.020587,False,False,True,True,False,False
+6var,5,750,0.063507,0.04784,0.063621,0.048111,0.061354,0.046628,0.061161,0.046333,False,False,True,True,False,False
+6var,20,750,0.123891,0.093428,0.125712,0.09577,0.126534,0.095683,0.125057,0.094387,True,True,True,True,True,True

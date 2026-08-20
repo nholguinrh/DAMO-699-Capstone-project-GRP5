@@ -37,14 +37,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from dieboldmariano import dm_test
+from statsmodels.tools.sm_exceptions import ValueWarning
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.vector_ar.vecm import VECM, coint_johansen
 
-# The daily index has business-day gaps (weekends/holidays) with no fixed freq,
-# which statsmodels flags on every VAR/VECM fit call.  Harmless here — forecasts
-# are indexed by position, not by date.
-warnings.filterwarnings("ignore", category=Warning, module="statsmodels")
+# The daily trading index has business-day gaps (weekends/holidays) with no fixed freq,
+# which statsmodels flags on every VAR/VECM fit call as a ValueWarning. Suppress this
+# specific warning while letting other warnings through.
+warnings.filterwarnings("ignore", category=ValueWarning, module="statsmodels")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_paths import PROCESSED_DIR  # noqa: E402
@@ -92,14 +93,26 @@ def load_gold_levels(feature_set: list[str]) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 2. Confirm all series are I(1)
+# 2. Confirm all series are I(1) & gate pipeline
 # ---------------------------------------------------------------------------
 
-def confirm_i1(levels: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
+def confirm_i1(
+    levels: pd.DataFrame, alpha: float = ALPHA, enforce: bool = True
+) -> pd.DataFrame:
     """
     ADF test on levels (expect non-stationary) and first differences (expect
     stationary).  A series is confirmed I(1) when p_level >= alpha AND
     p_diff < alpha.
+
+    Parameters
+    ----------
+    levels : pd.DataFrame
+        Level time series.
+    alpha : float, default 0.05
+        Significance level for ADF tests.
+    enforce : bool, default True
+        If True, raises RuntimeError if any series fails I(1) confirmation,
+        preventing invalid rank estimation.
     """
     results = []
     for col in levels.columns:
@@ -119,6 +132,16 @@ def confirm_i1(levels: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
         tag = "I(1)" if row["I1_confirmed"] else "NOT I(1)"
         print(f"    {row['variable']:25s}  p_level={row['adf_p_level']:.4f}  "
               f"p_diff={row['adf_p_diff']:.4f}  [{tag}]")
+
+    failed = df[~df["I1_confirmed"]]
+    if not failed.empty and enforce:
+        failed_vars = failed["variable"].tolist()
+        raise RuntimeError(
+            f"Stationarity assumption violated: variable(s) failed I(1) confirmation: {failed_vars}. "
+            "Johansen cointegration requires all input series to be I(1). "
+            "Set enforce=False only for diagnostic overrides."
+        )
+
     return df
 
 
@@ -249,21 +272,42 @@ def fit_and_summarize_vecm(
 # ---------------------------------------------------------------------------
 
 def evaluate_vecm(
-    levels: pd.DataFrame, k_ar_diff: int, coint_rank: int,
-    det_spec: str, aic_lag_diff: int,
+    levels: pd.DataFrame,
+    diffed: pd.DataFrame,
+    k_ar_diff: int,
+    coint_rank: int,
+    det_spec: str,
+    aic_lag_diff: int,
+    bic_lag_diff: int,
 ) -> tuple[pd.DataFrame, dict]:
     """
     Expanding-window forecast evaluation matching the VAR baseline protocol.
     At each origin, all four models are evaluated on the same data so the
     Diebold-Mariano test receives truly paired forecast errors.
 
-    Returns a metrics DataFrame and a dict of raw arrays keyed by horizon.
+    Parameters
+    ----------
+    levels : pd.DataFrame
+        Level time series.
+    diffed : pd.DataFrame
+        First-differenced time series (d_* columns).
+    k_ar_diff : int
+        Number of differenced lags for VECM.
+    coint_rank : int
+        Cointegrating rank for VECM.
+    det_spec : str
+        Deterministic specification for VECM (e.g. 'ci').
+    aic_lag_diff : int
+        Lag order for differenced VAR-AIC baseline.
+    bic_lag_diff : int
+        Lag order for differenced VAR-BIC baseline (if 0, uses drift model).
+
+    Returns
+    -------
+    tuple[pd.DataFrame, dict]
+        Metrics summary DataFrame and dict of raw arrays keyed by horizon.
     """
     target_idx = list(levels.columns).index(TARGET)
-
-    # Prepare differenced series for VAR comparison
-    diffed = levels.diff().dropna()
-    diffed.columns = [f"d_{c}" for c in levels.columns]
     target_diff_col = f"d_{TARGET}"
     diff_target_idx = list(diffed.columns).index(target_diff_col)
 
@@ -288,7 +332,7 @@ def evaluate_vecm(
                 coint_rank=coint_rank, deterministic=det_spec,
             ).fit()
             vecm_fc = vecm_fit.predict(steps=max_h)  # (max_h, n_vars) in levels
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError, IndexError):
             n_failed += 1
             continue
 
@@ -303,12 +347,27 @@ def evaluate_vecm(
                 train_diff.values[-aic_lag_diff:], steps=max_h,
             )
             var_cum_target = np.cumsum(var_fc[:, diff_target_idx])
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError, IndexError):
             n_failed += 1
             continue
 
-        # -- VAR-BIC forecast (drift model, BIC selected lag=0) --
-        mean_diff = float(train_diff[target_diff_col].mean())
+        # -- VAR-BIC forecast (dynamic lag: if lag=0 drift model; if lag>0 VAR) --
+        if bic_lag_diff == 0:
+            mean_diff = float(train_diff[target_diff_col].mean())
+            var_bic_cum_target = np.array([h_i * mean_diff for h_i in range(1, max_h + 1)])
+        else:
+            if len(train_diff) < bic_lag_diff:
+                n_failed += 1
+                continue
+            try:
+                var_bic_fit = VAR(train_diff).fit(bic_lag_diff)
+                var_bic_fc = var_bic_fit.forecast(
+                    train_diff.values[-bic_lag_diff:], steps=max_h,
+                )
+                var_bic_cum_target = np.cumsum(var_bic_fc[:, diff_target_idx])
+            except (ValueError, np.linalg.LinAlgError, IndexError):
+                n_failed += 1
+                continue
 
         for h in HORIZONS:
             future_pos = origin - 1 + h
@@ -319,7 +378,7 @@ def evaluate_vecm(
             records[h]["actual"].append(actual_val)
             records[h]["vecm"].append(float(vecm_fc[h - 1, target_idx]))
             records[h]["var_aic"].append(last_level + float(var_cum_target[h - 1]))
-            records[h]["var_bic"].append(last_level + h * mean_diff)
+            records[h]["var_bic"].append(last_level + float(var_bic_cum_target[h - 1]))
             records[h]["naive"].append(last_level)
 
         n_origins += 1
@@ -367,6 +426,8 @@ def evaluate_vecm(
             "vecm_beats_naive_mae": bool(mae_v < mae_nv),
             "vecm_beats_var_aic_rmse": bool(rmse_v < rmse_va),
             "vecm_beats_var_aic_mae": bool(mae_v < mae_va),
+            "vecm_beats_var_bic_rmse": bool(rmse_v < rmse_vb),
+            "vecm_beats_var_bic_mae": bool(mae_v < mae_vb),
         })
         raw[h] = (a, v, va, vb, nv)
 
@@ -420,7 +481,7 @@ def dm_report_vecm(raw: dict) -> pd.DataFrame:
 # 8. Full pipeline for one feature set
 # ---------------------------------------------------------------------------
 
-def run_pipeline(feature_set: list[str], label: str) -> dict:
+def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) -> dict:
     """
     Execute the complete Johansen/VECM analysis for a given feature set.
     Returns a dict containing all intermediate and final results.
@@ -435,22 +496,25 @@ def run_pipeline(feature_set: list[str], label: str) -> dict:
     print(f"  Shape: {levels.shape},  "
           f"{levels.index.min().date()} -> {levels.index.max().date()}")
 
-    # -- Step 2: Confirm I(1) --
+    # -- Step 2: Confirm I(1) & Gate --
     print(f"\n[2/7] Confirming I(1) via ADF tests...")
-    adf_results = confirm_i1(levels)
+    adf_results = confirm_i1(levels, enforce=enforce_i1)
 
-    # -- Step 3: Lag selection (levels VAR) --
+    # Prepare differenced series once for downstream use
+    diffed = levels.diff().dropna()
+    diffed.columns = [f"d_{c}" for c in levels.columns]
+
+    # -- Step 3: Lag selection (levels VAR + differenced VAR) --
     print(f"\n[3/7] Lag order selection on levels VAR (maxlags={MAX_LAG_SEARCH})...")
     aic_lag_levels, order_results = select_lag_levels(levels)
     k_ar_diff = max(1, aic_lag_levels - 1)
 
-    # Also compute AIC lag for the differenced VAR (for comparison model)
-    diffed = levels.diff().dropna()
-    diffed.columns = [f"d_{c}" for c in levels.columns]
-    aic_lag_diff = VAR(diffed).select_order(maxlags=MAX_LAG_SEARCH).aic
-    aic_lag_diff = max(1, aic_lag_diff)
+    # Dynamic AIC and BIC selection on differenced VAR for comparison baselines
+    diff_order_results = VAR(diffed).select_order(maxlags=MAX_LAG_SEARCH)
+    aic_lag_diff = max(1, diff_order_results.aic)
+    bic_lag_diff = diff_order_results.bic  # Can be 0 (drift model) or >= 1
     print(f"  Levels VAR AIC lag: {aic_lag_levels}  ->  VECM k_ar_diff = {k_ar_diff}")
-    print(f"  Differenced VAR AIC lag: {aic_lag_diff} (for comparison model)")
+    print(f"  Differenced VAR AIC lag: {aic_lag_diff}, BIC lag: {bic_lag_diff} (baselines)")
 
     # -- Step 4: Johansen cointegration test --
     print(f"\n[4/7] Johansen cointegration test (3 deterministic specifications)...")
@@ -460,10 +524,12 @@ def run_pipeline(feature_set: list[str], label: str) -> dict:
         "label": label,
         "feature_set": feature_set,
         "levels": levels,
+        "diffed": diffed,
         "adf_results": adf_results,
         "aic_lag_levels": aic_lag_levels,
         "k_ar_diff": k_ar_diff,
         "aic_lag_diff": aic_lag_diff,
+        "bic_lag_diff": bic_lag_diff,
         "johansen_df": johansen_df,
         "primary_rank": primary_rank,
         "vecm_fit": None,
@@ -499,7 +565,13 @@ def run_pipeline(feature_set: list[str], label: str) -> dict:
     print(f"\n[6/7] Expanding-window evaluation "
           f"(MIN_TRAIN={MIN_TRAIN}, STEP={STEP}, h={HORIZONS})...")
     eval_metrics, eval_raw = evaluate_vecm(
-        levels, k_ar_diff, primary_rank, det_spec, aic_lag_diff,
+        levels=levels,
+        diffed=diffed,
+        k_ar_diff=k_ar_diff,
+        coint_rank=primary_rank,
+        det_spec=det_spec,
+        aic_lag_diff=aic_lag_diff,
+        bic_lag_diff=bic_lag_diff,
     )
     print("\n" + eval_metrics.to_string(index=False))
     result["eval_metrics"] = eval_metrics
@@ -565,12 +637,22 @@ def main():
     johansen_all.to_csv(out_dir / "johansen_cointegration_results.csv", index=False)
     print("  -> johansen_cointegration_results.csv")
 
-    # Lag selection
+    # Lag selection (including both AIC and dynamic BIC for differenced VAR)
     lag_df = pd.DataFrame([
-        {"system": "5var", "aic_lag_levels": r5["aic_lag_levels"],
-         "k_ar_diff": r5["k_ar_diff"], "aic_lag_diff": r5["aic_lag_diff"]},
-        {"system": "6var", "aic_lag_levels": r6["aic_lag_levels"],
-         "k_ar_diff": r6["k_ar_diff"], "aic_lag_diff": r6["aic_lag_diff"]},
+        {
+            "system": "5var",
+            "aic_lag_levels": r5["aic_lag_levels"],
+            "k_ar_diff": r5["k_ar_diff"],
+            "aic_lag_diff": r5["aic_lag_diff"],
+            "bic_lag_diff": r5["bic_lag_diff"],
+        },
+        {
+            "system": "6var",
+            "aic_lag_levels": r6["aic_lag_levels"],
+            "k_ar_diff": r6["k_ar_diff"],
+            "aic_lag_diff": r6["aic_lag_diff"],
+            "bic_lag_diff": r6["bic_lag_diff"],
+        },
     ])
     lag_df.to_csv(out_dir / "johansen_lag_selection.csv", index=False)
     print("  -> johansen_lag_selection.csv")

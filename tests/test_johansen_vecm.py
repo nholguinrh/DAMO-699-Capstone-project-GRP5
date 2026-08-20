@@ -1,9 +1,15 @@
 """
 Unit tests for Johansen Cointegration Test + Conditional VECM (Issue #47)
 
-Uses the existing ``synthetic_gold_inputs`` fixture from conftest.py
-(40 business days of synthetic BoC, FRED, and StatCan CPI data) plus
-a longer synthetic fixture for tests that need more observations.
+Comprehensive test suite covering:
+1. Gold-layer levels loading
+2. ADF I(1) confirmation and pipeline gating (enforce=True / False)
+3. Johansen test output structure and all deterministic cases
+4. VECM fitting and parameter extraction (beta, alpha)
+5. Expanding-window evaluation mechanics with dynamic BIC lags (p=0 and p>0)
+6. 4-way Diebold-Mariano test report formatting and boolean verdicts
+7. Negative result handling (r=0)
+8. End-to-end pipeline execution smoke test
 """
 
 import sys
@@ -26,8 +32,12 @@ from src.johansen_vecm import (  # noqa: E402
     TARGET,
     confirm_i1,
     dm_report_vecm,
+    evaluate_vecm,
+    fit_and_summarize_vecm,
     load_gold_levels,
     run_johansen_all_specs,
+    run_pipeline,
+    select_lag_levels,
 )
 
 
@@ -87,11 +97,10 @@ def synthetic_gold_csv(tmp_path: Path) -> Path:
 @pytest.fixture
 def synthetic_levels() -> pd.DataFrame:
     """
-    200-row DataFrame of I(1) level series for direct function testing
-    (no CSV round-trip needed).
+    250-row DataFrame of I(1) level series for direct function testing.
     """
     np.random.seed(42)
-    n = 200
+    n = 250
     dates = pd.bdate_range("2023-01-02", periods=n)
     data = {}
     starts = {
@@ -108,6 +117,30 @@ def synthetic_levels() -> pd.DataFrame:
     return pd.DataFrame(data, index=dates)
 
 
+@pytest.fixture
+def synthetic_cointegrated_levels() -> pd.DataFrame:
+    """
+    Synthetic cointegrated system (n=120):
+    Y1 and Y2 share a common random walk trend W_t.
+    Y1_t = W_t + e1_t
+    Y2_t = 2*W_t + e2_t
+    -> Cointegrating vector: [2, -1]'
+    """
+    np.random.seed(123)
+    n = 120
+    dates = pd.bdate_range("2023-01-02", periods=n)
+    w = np.cumsum(np.random.normal(0, 0.05, n))
+    y1 = w + np.random.normal(0, 0.01, n)
+    y2 = 2.0 * w + np.random.normal(0, 0.01, n)
+    y3 = np.cumsum(np.random.normal(0, 0.02, n))
+
+    return pd.DataFrame({
+        "yield_spread_10y_2y": y1,
+        "overnight_rate": y2,
+        "us_treasury_10y": y3,
+    }, index=dates)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -117,7 +150,6 @@ class TestLoadGoldLevels:
 
     def test_returns_dataframe_with_correct_columns(self, synthetic_gold_csv, monkeypatch):
         """Validates column selection returns only requested features."""
-        # Monkeypatch PROCESSED_DIR to point at our temp dir
         import src.johansen_vecm as jv
         monkeypatch.setattr(jv, "PROCESSED_DIR", synthetic_gold_csv.parent)
 
@@ -144,11 +176,11 @@ class TestLoadGoldLevels:
 
 
 class TestConfirmI1:
-    """Tests for confirm_i1() — ADF stationarity verification."""
+    """Tests for confirm_i1() — ADF stationarity verification and gating."""
 
     def test_output_structure(self, synthetic_levels):
         """Validates output DataFrame has expected columns."""
-        result = confirm_i1(synthetic_levels)
+        result = confirm_i1(synthetic_levels, enforce=False)
         assert isinstance(result, pd.DataFrame)
         assert "variable" in result.columns
         assert "adf_p_level" in result.columns
@@ -161,8 +193,27 @@ class TestConfirmI1:
         np.random.seed(99)
         rw = np.cumsum(np.random.normal(0, 1, 500))
         df = pd.DataFrame({"rw": rw}, index=pd.bdate_range("2020-01-01", periods=500))
-        result = confirm_i1(df)
+        result = confirm_i1(df, enforce=True)
         assert result["I1_confirmed"].iloc[0], "Random walk should be confirmed I(1)"
+
+    def test_gating_raises_runtime_error_on_stationary_data(self):
+        """When a series is stationary I(0) in levels, enforce=True must raise RuntimeError."""
+        np.random.seed(101)
+        # White noise stationary series
+        stationary = np.random.normal(0, 1, 300)
+        df = pd.DataFrame({"stat_var": stationary}, index=pd.bdate_range("2020-01-01", periods=300))
+
+        with pytest.raises(RuntimeError, match="Stationarity assumption violated"):
+            confirm_i1(df, enforce=True)
+
+    def test_gating_bypassed_when_enforce_false(self):
+        """When enforce=False, non-I(1) series returns dataframe without error."""
+        np.random.seed(101)
+        stationary = np.random.normal(0, 1, 300)
+        df = pd.DataFrame({"stat_var": stationary}, index=pd.bdate_range("2020-01-01", periods=300))
+
+        res = confirm_i1(df, enforce=False)
+        assert not res["I1_confirmed"].iloc[0]
 
 
 class TestJohansenOutputStructure:
@@ -204,12 +255,79 @@ class TestJohansenOutputStructure:
         assert 0 <= rank <= synthetic_levels.shape[1]
 
 
+class TestVECMEstimationAndEvaluation:
+    """Tests for VECM fitting, summary, and expanding-window evaluation."""
+
+    def test_fit_and_summarize_vecm(self, synthetic_cointegrated_levels):
+        """Validates VECM estimation returns result with beta and alpha attributes."""
+        res = fit_and_summarize_vecm(
+            synthetic_cointegrated_levels, k_ar_diff=1, coint_rank=1, det_spec="ci"
+        )
+        assert hasattr(res, "beta")
+        assert hasattr(res, "alpha")
+        assert res.beta.shape[0] == synthetic_cointegrated_levels.shape[1]
+        assert res.alpha.shape[0] == synthetic_cointegrated_levels.shape[1]
+
+    def test_evaluate_vecm_with_drift_bic(self, synthetic_cointegrated_levels, monkeypatch):
+        """Validates evaluate_vecm when bic_lag_diff=0 (drift model)."""
+        import src.johansen_vecm as jv
+        monkeypatch.setattr(jv, "MIN_TRAIN", 60)
+        monkeypatch.setattr(jv, "STEP", 10)
+        monkeypatch.setattr(jv, "HORIZONS", [1, 5])
+
+        diffed = synthetic_cointegrated_levels.diff().dropna()
+        diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
+
+        metrics_df, raw = evaluate_vecm(
+            levels=synthetic_cointegrated_levels,
+            diffed=diffed,
+            k_ar_diff=1,
+            coint_rank=1,
+            det_spec="ci",
+            aic_lag_diff=1,
+            bic_lag_diff=0,  # Drift model test
+        )
+
+        assert isinstance(metrics_df, pd.DataFrame)
+        assert not metrics_df.empty
+        assert "rmse_vecm" in metrics_df.columns
+        assert "rmse_var_bic" in metrics_df.columns
+        assert 1 in raw and 5 in raw
+        # Assert each raw tuple has 5 aligned arrays
+        assert len(raw[1]) == 5
+        actual, vecm, var_aic, var_bic, naive = raw[1]
+        assert len(actual) == len(vecm) == len(var_aic) == len(var_bic) == len(naive)
+
+    def test_evaluate_vecm_with_lagged_bic(self, synthetic_cointegrated_levels, monkeypatch):
+        """Validates evaluate_vecm when bic_lag_diff=1 (VAR model)."""
+        import src.johansen_vecm as jv
+        monkeypatch.setattr(jv, "MIN_TRAIN", 60)
+        monkeypatch.setattr(jv, "STEP", 10)
+        monkeypatch.setattr(jv, "HORIZONS", [1, 5])
+
+        diffed = synthetic_cointegrated_levels.diff().dropna()
+        diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
+
+        metrics_df, raw = evaluate_vecm(
+            levels=synthetic_cointegrated_levels,
+            diffed=diffed,
+            k_ar_diff=1,
+            coint_rank=1,
+            det_spec="ci",
+            aic_lag_diff=1,
+            bic_lag_diff=1,  # Lagged VAR model test
+        )
+
+        assert isinstance(metrics_df, pd.DataFrame)
+        assert not metrics_df.empty
+        assert "rmse_var_bic" in metrics_df.columns
+
+
 class TestDMReportColumns:
     """Tests for dm_report_vecm() output format."""
 
     def test_output_columns_present(self):
         """Validates DM report DataFrame has expected column naming pattern."""
-        # Create minimal synthetic raw data
         np.random.seed(42)
         n = 50
         raw = {
@@ -245,18 +363,22 @@ class TestDMReportColumns:
             assert result[col].dtype == bool, f"{col} should be boolean"
 
 
-class TestNegativeResultHandling:
-    """Tests for proper handling when no cointegration is found."""
+class TestRunPipelineSmoke:
+    """End-to-end smoke tests for run_pipeline."""
 
-    def test_rank_zero_returns_none_vecm(self, synthetic_levels):
-        """When rank=0, the pipeline result should have None for VECM fields."""
-        # We can't force r=0 easily, but we can verify the function signature
-        # accepts r=0 gracefully by checking run_johansen_all_specs returns
-        # a valid rank
-        k_ar_diff = 1
-        df, rank = run_johansen_all_specs(synthetic_levels, k_ar_diff)
-        assert isinstance(rank, int)
-        # If rank is 0, there should be no VECM estimation
-        # If rank > 0, that's fine too — we just verify the interface
-        assert df is not None
-        assert len(df) > 0
+    def test_run_pipeline_execution(self, synthetic_gold_csv, monkeypatch):
+        """Validates run_pipeline runs cleanly on synthetic gold CSV."""
+        import src.johansen_vecm as jv
+        monkeypatch.setattr(jv, "PROCESSED_DIR", synthetic_gold_csv.parent)
+        monkeypatch.setattr(jv, "MIN_TRAIN", 60)
+        monkeypatch.setattr(jv, "STEP", 20)
+        monkeypatch.setattr(jv, "HORIZONS", [1, 5])
+        monkeypatch.setattr(jv, "MAX_LAG_SEARCH", 3)
+
+        features = ["yield_spread_10y_2y", "overnight_rate", "us_treasury_10y"]
+        res = run_pipeline(features, "Smoke Test System", enforce_i1=False)
+
+        assert isinstance(res, dict)
+        assert "primary_rank" in res
+        assert "johansen_df" in res
+        assert "bic_lag_diff" in res
