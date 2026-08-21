@@ -36,7 +36,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from dieboldmariano import dm_test
 from statsmodels.tools.sm_exceptions import ValueWarning
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import adfuller
@@ -48,7 +47,8 @@ from statsmodels.tsa.vector_ar.vecm import VECM, coint_johansen
 warnings.filterwarnings("ignore", category=ValueWarning, module="statsmodels")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project_paths import PROCESSED_DIR  # noqa: E402
+from project_paths import PROCESSED_DIR, PROJECT_ROOT  # noqa: E402
+from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config
@@ -393,7 +393,7 @@ def evaluate_vecm(
     # Compute per-horizon metrics
     rows: list[dict] = []
     raw: dict = {}
-    forecast_rows: list[dict] = []  # per-origin forecasts, for cross-model comparison (issue #50)
+    forecast_parts: list[pd.DataFrame] = []  # per-origin forecasts, for comparison (issue #50)
     for h in HORIZONS:
         a = np.array(records[h]["actual"])
         v = np.array(records[h]["vecm"])
@@ -433,15 +433,15 @@ def evaluate_vecm(
             "vecm_beats_var_bic_mae": bool(mae_v < mae_vb),
         })
         raw[h] = (a, v, va, vb, nv)
-        for origin_date, a_i, v_i, va_i, vb_i, nv_i in zip(
-            records[h]["origin_date"], a, v, va, vb, nv
-        ):
-            forecast_rows.append({
-                "origin_date": origin_date, "horizon": h,
-                "actual": a_i, "vecm": v_i, "var_aic": va_i, "var_bic": vb_i, "naive": nv_i,
-            })
+        forecast_parts.append(pd.DataFrame({
+            "origin_date": records[h]["origin_date"], "horizon": h,
+            "actual": a, "vecm": v, "var_aic": va, "var_bic": vb, "naive": nv,
+        }))
 
-    return pd.DataFrame(rows), raw, pd.DataFrame(forecast_rows)
+    forecasts = pd.concat(forecast_parts, ignore_index=True) if forecast_parts else pd.DataFrame(
+        columns=["origin_date", "horizon", "actual", "vecm", "var_aic", "var_bic", "naive"]
+    )
+    return pd.DataFrame(rows), raw, forecasts
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +453,10 @@ def dm_report_vecm(raw: dict) -> pd.DataFrame:
     Run DM tests comparing VECM against naive, VAR-AIC, and VAR-BIC.
     Uses Harvey-corrected, Bartlett-kernel long-run variance (h-1 truncation)
     matching the existing VAR baselines' dm_report() (issues #43, #44).
+
+    Computes the actual test via the shared `pairwise_dm()` (src/model_comparison.py)
+    so this and #28's dm_report() don't each hand-maintain their own copy of the same
+    dm_test() call parameters.
     """
     rows: list[dict] = []
 
@@ -461,26 +465,15 @@ def dm_report_vecm(raw: dict) -> pd.DataFrame:
         row: dict = {"horizon_days": h}
 
         for name, alt in comparisons.items():
-            dm_sq, p_sq = dm_test(
-                actual, vecm, alt,
-                loss=lambda u, v: (u - v) ** 2,
-                h=h, harvey_correction=True, variance_estimator="bartlett",
-            )
-            dm_abs, p_abs = dm_test(
-                actual, vecm, alt,
-                loss=lambda u, v: abs(u - v),
-                h=h, harvey_correction=True, variance_estimator="bartlett",
-            )
-
-            row[f"dm_vecm_{name}_stat_sq"] = round(dm_sq, 3)
-            row[f"dm_vecm_{name}_p_sq"] = round(p_sq, 4)
-            row[f"dm_vecm_{name}_stat_abs"] = round(dm_abs, 3)
-            row[f"dm_vecm_{name}_p_abs"] = round(p_abs, 4)
-            # Verdicts: negative DM stat means model 1 (VECM) is better
-            row[f"vecm_sig_better_{name}_rmse"] = bool(p_sq < ALPHA and dm_sq < 0)
-            row[f"{name}_sig_better_vecm_rmse"] = bool(p_sq < ALPHA and dm_sq > 0)
-            row[f"vecm_sig_better_{name}_mae"] = bool(p_abs < ALPHA and dm_abs < 0)
-            row[f"{name}_sig_better_vecm_mae"] = bool(p_abs < ALPHA and dm_abs > 0)
+            r = pairwise_dm(actual, vecm, alt, h)
+            row[f"dm_vecm_{name}_stat_sq"] = r["dm_stat_squared_loss"]
+            row[f"dm_vecm_{name}_p_sq"] = r["dm_p_value_squared_loss"]
+            row[f"dm_vecm_{name}_stat_abs"] = r["dm_stat_absolute_loss"]
+            row[f"dm_vecm_{name}_p_abs"] = r["dm_p_value_absolute_loss"]
+            row[f"vecm_sig_better_{name}_rmse"] = r["a_significantly_better_rmse"]
+            row[f"{name}_sig_better_vecm_rmse"] = r["b_significantly_better_rmse"]
+            row[f"vecm_sig_better_{name}_mae"] = r["a_significantly_better_mae"]
+            row[f"{name}_sig_better_vecm_mae"] = r["b_significantly_better_mae"]
 
         rows.append(row)
 
@@ -594,28 +587,24 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     dm_results = dm_report_vecm(eval_raw)
     result["dm_results"] = dm_results
 
-    # Print verdicts
+    # Print verdicts. Built via the shared plain_language_verdict() decision tree
+    # (src/model_comparison.py) instead of a second hand-maintained copy of it --
+    # this file's own inline copy was missing the "mixed result" branch (RMSE and
+    # MAE significant but disagreeing on the winner), which silently printed a
+    # one-sided verdict when that happened. Found in PR #64 review.
     for _, row in dm_results.iterrows():
         h = int(row["horizon_days"])
         verdicts = []
         for rival in ["naive", "var_aic", "var_bic"]:
-            v_rmse = row.get(f"vecm_sig_better_{rival}_rmse", False)
-            v_mae = row.get(f"vecm_sig_better_{rival}_mae", False)
-            r_rmse = row.get(f"{rival}_sig_better_vecm_rmse", False)
-            r_mae = row.get(f"{rival}_sig_better_vecm_mae", False)
-
-            if v_rmse and v_mae:
-                verdicts.append(f"VECM sig. better than {rival} (RMSE & MAE)")
-            elif r_rmse and r_mae:
-                verdicts.append(f"{rival} sig. better than VECM (RMSE & MAE)")
-            elif v_rmse or v_mae:
-                m = "RMSE" if v_rmse else "MAE"
-                verdicts.append(f"VECM better than {rival} on {m} only")
-            elif r_rmse or r_mae:
-                m = "RMSE" if r_rmse else "MAE"
-                verdicts.append(f"{rival} better than VECM on {m} only")
-            else:
-                verdicts.append(f"no sig. diff. vs {rival}")
+            verdict_row = {
+                "a_significantly_better_rmse": row.get(f"vecm_sig_better_{rival}_rmse", False),
+                "b_significantly_better_rmse": row.get(f"{rival}_sig_better_vecm_rmse", False),
+                "a_significantly_better_mae": row.get(f"vecm_sig_better_{rival}_mae", False),
+                "b_significantly_better_mae": row.get(f"{rival}_sig_better_vecm_mae", False),
+                "dm_p_value_squared_loss": row.get(f"dm_vecm_{rival}_p_sq"),
+                "dm_p_value_absolute_loss": row.get(f"dm_vecm_{rival}_p_abs"),
+            }
+            verdicts.append(f"vs {rival}: {plain_language_verdict(verdict_row, 'VECM', rival)}")
         print(f"  h={h}: {'; '.join(verdicts)}")
 
     return result
@@ -626,7 +615,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
 # ---------------------------------------------------------------------------
 
 def main():
-    out_dir = Path("outputs")
+    out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
 
     # -- Run 5-variable system (primary) --

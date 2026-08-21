@@ -144,10 +144,31 @@ compared pairwise at all three horizons — Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC
   (its rolling-CV folds cover ~3,728 origins vs. everyone else's ~698-750).
 - Discovered mid-build: ARIMA/VAR-AIC/VAR-BIC (`load_levels()`) and VECM/LSTM
   (`build_gold_features()`) run on two different, unreconciled calendars — cross-pipeline pairs
-  needed an explicit "actual value must agree" filter to avoid silently pairing forecasts against
-  the wrong outcome (see `src/model_comparison.py`'s docstring). Filed as `#63`, not fixed here —
-  #50's numbers are correct for the samples reported, just smaller-sample for VECM/LSTM pairs than
-  the same-pipeline ones (as few as ~30 origins at h=20).
+  need explicit verification to avoid silently pairing forecasts against the wrong outcome. Filed
+  as `#63`, not fixed here — #50's numbers are correct for the samples reported, just
+  smaller-sample for VECM/LSTM pairs than the same-pipeline ones.
+
+**Aug 20/21 — pre-review fix pass on `#50`'s PR (#64), before sending for review.** A deep review
+caught that the cross-pipeline verification above (comparing `actual` values with a float
+tolerance) wasn't sufficient: `build_gold_features()` forward-fills yield levels before computing
+the target spread, so ~16% of `gold_features.csv` rows repeat their prior value, and two genuinely
+different real target dates can coincidentally carry the same `actual` value — 12 of 30
+ARIMA-AIC-vs-VECM rows at h=20 were silently mispaired this way. Replaced with real verification:
+`src/model_comparison.py`'s `attach_target_date()` walks each pipeline's own calendar forward
+`horizon` positions from `origin_date` and requires the two sides' real target dates to match, not
+just their `actual` values — correctly shrinks the ARIMA-vs-VECM h=20 sample to 18 origins (below
+`dieboldmariano`'s minimum for h=20, now reported as `insufficient_sample` instead of crashing or
+silently accepting false ties). Also fixed in the same pass: an off-by-one risk from thin
+cross-pipeline samples hitting `dm_test()`'s exception path uncaught; a cwd-relative vs.
+project-root-absolute path mismatch between the forecast-producing scripts and the comparison
+module; `notebooks/03_models/johansen_vecm.ipynb` had silently drifted out of sync with
+`evaluate_vecm()`'s signature and could no longer run; and `src/johansen_vecm.py`'s own inline
+verdict-printing loop was missing the "mixed RMSE/MAE result" branch that `#43` was originally
+filed to fix elsewhere — consolidated `dm_report()` (`EDA_VAR_AIC`), `dm_report_vecm()`
+(`johansen_vecm`), and both files' verdict loops onto the one shared `pairwise_dm()` /
+`plain_language_verdict()` in `model_comparison.py` so this doesn't drift a third time. All
+re-verified against a fresh top-to-bottom notebook run and the full test suite; substantive
+findings unchanged.
 
 **Result:** no model significantly beats Naive in the direction that would support a
 forecasting-improvement claim, at any horizon, consistent with each baseline's own individual
