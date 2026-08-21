@@ -279,7 +279,7 @@ def evaluate_vecm(
     det_spec: str,
     aic_lag_diff: int,
     bic_lag_diff: int,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """
     Expanding-window forecast evaluation matching the VAR baseline protocol.
     At each origin, all four models are evaluated on the same data so the
@@ -313,7 +313,7 @@ def evaluate_vecm(
 
     max_h = max(HORIZONS)
     records = {
-        h: {"actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": []}
+        h: {"actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": [], "origin_date": []}
         for h in HORIZONS
     }
 
@@ -369,6 +369,7 @@ def evaluate_vecm(
                 n_failed += 1
                 continue
 
+        origin_date = levels.index[origin - 1]
         for h in HORIZONS:
             future_pos = origin - 1 + h
             if future_pos >= n:
@@ -380,6 +381,7 @@ def evaluate_vecm(
             records[h]["var_aic"].append(last_level + float(var_cum_target[h - 1]))
             records[h]["var_bic"].append(last_level + float(var_bic_cum_target[h - 1]))
             records[h]["naive"].append(last_level)
+            records[h]["origin_date"].append(origin_date)
 
         n_origins += 1
         if n_origins % 100 == 0:
@@ -391,6 +393,7 @@ def evaluate_vecm(
     # Compute per-horizon metrics
     rows: list[dict] = []
     raw: dict = {}
+    forecast_rows: list[dict] = []  # per-origin forecasts, for cross-model comparison (issue #50)
     for h in HORIZONS:
         a = np.array(records[h]["actual"])
         v = np.array(records[h]["vecm"])
@@ -430,8 +433,15 @@ def evaluate_vecm(
             "vecm_beats_var_bic_mae": bool(mae_v < mae_vb),
         })
         raw[h] = (a, v, va, vb, nv)
+        for origin_date, a_i, v_i, va_i, vb_i, nv_i in zip(
+            records[h]["origin_date"], a, v, va, vb, nv
+        ):
+            forecast_rows.append({
+                "origin_date": origin_date, "horizon": h,
+                "actual": a_i, "vecm": v_i, "var_aic": va_i, "var_bic": vb_i, "naive": nv_i,
+            })
 
-    return pd.DataFrame(rows), raw
+    return pd.DataFrame(rows), raw, pd.DataFrame(forecast_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +545,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
         "vecm_fit": None,
         "eval_metrics": None,
         "eval_raw": None,
+        "eval_forecasts": None,
         "dm_results": None,
     }
 
@@ -564,7 +575,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     # -- Step 6: Expanding-window evaluation --
     print(f"\n[6/7] Expanding-window evaluation "
           f"(MIN_TRAIN={MIN_TRAIN}, STEP={STEP}, h={HORIZONS})...")
-    eval_metrics, eval_raw = evaluate_vecm(
+    eval_metrics, eval_raw, eval_forecasts = evaluate_vecm(
         levels=levels,
         diffed=diffed,
         k_ar_diff=k_ar_diff,
@@ -576,6 +587,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     print("\n" + eval_metrics.to_string(index=False))
     result["eval_metrics"] = eval_metrics
     result["eval_raw"] = eval_raw
+    result["eval_forecasts"] = eval_forecasts
 
     # -- Step 7: Diebold-Mariano tests --
     print(f"\n[7/7] Diebold-Mariano significance tests (4-way comparison)...")
@@ -679,6 +691,13 @@ def main():
             out_dir / "vecm_diebold_mariano.csv", index=False,
         )
         print("  -> vecm_diebold_mariano.csv")
+
+    # Per-origin forecasts for the 6-variable system, for cross-model comparison (issue #50) --
+    # 5var isn't exported since #50 uses the 6var system to match ARIMA/VAR-AIC/VAR-BIC/LSTM's
+    # proposal-correct feature set (see M2_CHECKLIST.md's Aug 19 usdcad entry).
+    if r6["eval_forecasts"] is not None and not r6["eval_forecasts"].empty:
+        r6["eval_forecasts"].to_csv(out_dir / "r3_vecm_6var_forecasts.csv", index=False)
+        print("  -> r3_vecm_6var_forecasts.csv")
 
     # Summary
     print(f"\n{'=' * 70}")

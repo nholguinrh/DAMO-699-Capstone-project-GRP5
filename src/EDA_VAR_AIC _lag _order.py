@@ -147,7 +147,7 @@ def select_aic_lag(diffed: pd.DataFrame) -> int:
 # 4. Random Walk benchmark + AIC-VAR, evaluated in LEVELS at each horizon
 # ----------------------------------------------------------------------------
 
-def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.DataFrame, dict]:
+def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """
     Expanding-window evaluation. At each origin t (indexed into `levels`, offset by 1
     to line up with `diffed`):
@@ -165,7 +165,7 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     level_idx_for_diff_row = {i: levels.index.get_loc(diffed.index[i]) for i in range(len(diffed))}
 
     max_h = max(HORIZONS)
-    records = {h: {"actual": [], "var_pred": [], "naive_pred": []} for h in HORIZONS}
+    records = {h: {"actual": [], "var_pred": [], "naive_pred": [], "origin_date": []} for h in HORIZONS}
 
     n = len(diffed)
     for origin in range(MIN_TRAIN, n - max_h, STEP):
@@ -179,8 +179,18 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
         fc_target_diffs = fc[:, diff_target_idx]
         cum_fc = np.cumsum(fc_target_diffs)  # cumulative reconstructed level change
 
-        level_pos = level_idx_for_diff_row[origin]
+        # Issue #50 review: was level_idx_for_diff_row[origin], which resolves to
+        # diffed.index[origin] -- one row PAST the training cutoff (train = diffed.iloc[:origin]
+        # excludes that row). That silently anchored last_level/naive one business day later
+        # than the actual last training observation, leaking an otherwise-unseen level into both
+        # the naive and VAR forecasts and desyncing this script's origin grid from every sibling
+        # baseline's (ARIMA/VAR-BIC/VECM), which all anchor on the last row actually in train.
+        # Fixed to origin - 1, the last row diffed.iloc[:origin] actually contains. Substantive
+        # finding (VAR does not beat naive at any horizon) is unchanged; RMSE/MAE shift slightly
+        # -- see M2_CHECKLIST.md.
+        level_pos = level_idx_for_diff_row[origin - 1]
         last_level = levels[TARGET].iloc[level_pos]
+        origin_date = levels.index[level_pos]
 
         for h in HORIZONS:
             future_pos = level_pos + h
@@ -193,9 +203,11 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
             records[h]["actual"].append(actual_level)
             records[h]["var_pred"].append(var_level_pred)
             records[h]["naive_pred"].append(naive_level_pred)
+            records[h]["origin_date"].append(origin_date)
 
     rows = []
     raw = {}  # h -> (actual, var_pred, naive_pred) arrays, for the DM test in step 5
+    forecast_rows = []  # per-origin forecasts, for cross-model comparison (issue #50)
     for h in HORIZONS:
         actual = np.array(records[h]["actual"])
         var_pred = np.array(records[h]["var_pred"])
@@ -220,8 +232,13 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
             "var_beats_naive_mae": bool(mae_var < mae_naive),
         })
         raw[h] = (actual, var_pred, naive_pred)
+        for origin_date, a, v, nv in zip(records[h]["origin_date"], actual, var_pred, naive_pred):
+            forecast_rows.append({
+                "origin_date": origin_date, "horizon": h,
+                "actual": a, "var_aic": v, "naive": nv,
+            })
 
-    return pd.DataFrame(rows), raw
+    return pd.DataFrame(rows), raw, pd.DataFrame(forecast_rows)
 
 
 # ----------------------------------------------------------------------------
@@ -314,7 +331,7 @@ def main():
 
     print(f"\n[4/5] Building Random Walk benchmark + VAR(AIC lag={aic_lag}), "
           f"scoring RMSE/MAE at {HORIZONS}-day horizons in levels (proposal §5.4)...")
-    results, raw = evaluate(levels, diffed, aic_lag)
+    results, raw, forecasts = evaluate(levels, diffed, aic_lag)
     print("\n" + results.to_string(index=False))
 
     print("\n[5/5] Diebold-Mariano test: is the RMSE/MAE gap significant, or noise?")
@@ -355,8 +372,10 @@ def main():
     out_dir.mkdir(exist_ok=True)
     results.to_csv(out_dir / "r3_patha_rmse_mae_vs_naive.csv", index=False)
     dm_results.to_csv(out_dir / "r3_patha_diebold_mariano.csv", index=False)
+    forecasts.to_csv(out_dir / "r3_patha_var_aic_forecasts.csv", index=False)
     print(f"\nSaved: {out_dir}/r3_patha_rmse_mae_vs_naive.csv, "
-          f"{out_dir}/r3_patha_diebold_mariano.csv")
+          f"{out_dir}/r3_patha_diebold_mariano.csv, "
+          f"{out_dir}/r3_patha_var_aic_forecasts.csv")
 
 
 if __name__ == "__main__":

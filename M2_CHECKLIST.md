@@ -115,6 +115,44 @@ Decision: restore `usdcad` as the 6th predictor everywhere. Applied Aug 19:
 All three models now share the same proposal-correct 6-variable feature set, which is what makes
 `#50`'s eventual pairwise Diebold-Mariano comparison across Naive/ARIMA/VAR/VECM/LSTM valid.
 
+**Aug 20 correction — off-by-one in `#28`'s (`src/EDA_VAR_AIC _lag _order.py`) forecast origin
+anchor, found while building `#50`'s cross-model alignment.** `evaluate()` anchored `last_level`
+(and therefore both the naive and VAR forecast base) on `level_idx_for_diff_row[origin]`, which
+resolves to the differenced row just *past* the training cutoff — `train = diffed.iloc[:origin]`
+excludes that row, so the anchor was reading one business day of otherwise-unseen level data into
+every origin, and #28's origin grid never lined up date-for-date with #29/ARIMA/VECM's (0 dates in
+common, verified). Fixed to `level_idx_for_diff_row[origin - 1]`, the last row `train` actually
+contains — origin dates now match #29/ARIMA exactly (2,094/2,094 rows, `actual`/`naive` identical
+to the bit). Substantive finding is unchanged (VAR does not beat naive at any horizon), but the
+significance got *stronger*, not weaker: h=1 and h=5 now both show naive significantly better than
+VAR-AIC on RMSE and MAE (previously only MAE at h=1, nothing at h=5). Regenerated
+`outputs/r3_patha_rmse_mae_vs_naive.csv` and `outputs/r3_patha_diebold_mariano.csv`; added
+`outputs/r3_patha_var_aic_forecasts.csv` (per-origin forecasts, previously not exported) so #50 can
+merge on `origin_date`.
+
+**Aug 20 — `#50` (pairwise Diebold-Mariano across all Round 3 baselines) shipped.** Seven arms
+compared pairwise at all three horizons — Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC, VAR-BIC, VECM
+(6-var), LSTM (21 pairs x 3 horizons = 63 tests, `notebooks/04_diagnostics/dm_pairwise_comparison.ipynb`,
+`outputs/r3_pairwise_diebold_mariano.csv`). Decisions made along the way:
+
+- ARIMA-AIC and ARIMA-BIC kept as separate arms, mirroring the VAR-AIC/VAR-BIC sensitivity-check
+  precedent above — no forced winner.
+- VECM scored on its 6-variable system only, not the 5-variable system PR #59 calls "primary" —
+  the 6-var set matches ARIMA/VAR-AIC/VAR-BIC/LSTM's proposal-correct feature set per the Aug 19
+  usdcad decision.
+- LSTM's forecasts restricted to the same calendar span as the other baselines before comparison
+  (its rolling-CV folds cover ~3,728 origins vs. everyone else's ~698-750).
+- Discovered mid-build: ARIMA/VAR-AIC/VAR-BIC (`load_levels()`) and VECM/LSTM
+  (`build_gold_features()`) run on two different, unreconciled calendars — cross-pipeline pairs
+  needed an explicit "actual value must agree" filter to avoid silently pairing forecasts against
+  the wrong outcome (see `src/model_comparison.py`'s docstring). Filed as `#63`, not fixed here —
+  #50's numbers are correct for the samples reported, just smaller-sample for VECM/LSTM pairs than
+  the same-pipeline ones (as few as ~30 origins at h=20).
+
+**Result:** no model significantly beats Naive in the direction that would support a
+forecasting-improvement claim, at any horizon, consistent with each baseline's own individual
+finding. h=20 has almost no significant pairwise results anywhere in the table.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
