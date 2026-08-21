@@ -36,7 +36,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from dieboldmariano import dm_test
 from statsmodels.tools.sm_exceptions import ValueWarning
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import adfuller
@@ -48,7 +47,8 @@ from statsmodels.tsa.vector_ar.vecm import VECM, coint_johansen
 warnings.filterwarnings("ignore", category=ValueWarning, module="statsmodels")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project_paths import PROCESSED_DIR  # noqa: E402
+from project_paths import PROCESSED_DIR, PROJECT_ROOT  # noqa: E402
+from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config
@@ -279,7 +279,7 @@ def evaluate_vecm(
     det_spec: str,
     aic_lag_diff: int,
     bic_lag_diff: int,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """
     Expanding-window forecast evaluation matching the VAR baseline protocol.
     At each origin, all four models are evaluated on the same data so the
@@ -313,7 +313,7 @@ def evaluate_vecm(
 
     max_h = max(HORIZONS)
     records = {
-        h: {"actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": []}
+        h: {"actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": [], "origin_date": []}
         for h in HORIZONS
     }
 
@@ -369,6 +369,7 @@ def evaluate_vecm(
                 n_failed += 1
                 continue
 
+        origin_date = levels.index[origin - 1]
         for h in HORIZONS:
             future_pos = origin - 1 + h
             if future_pos >= n:
@@ -380,6 +381,7 @@ def evaluate_vecm(
             records[h]["var_aic"].append(last_level + float(var_cum_target[h - 1]))
             records[h]["var_bic"].append(last_level + float(var_bic_cum_target[h - 1]))
             records[h]["naive"].append(last_level)
+            records[h]["origin_date"].append(origin_date)
 
         n_origins += 1
         if n_origins % 100 == 0:
@@ -391,6 +393,7 @@ def evaluate_vecm(
     # Compute per-horizon metrics
     rows: list[dict] = []
     raw: dict = {}
+    forecast_parts: list[pd.DataFrame] = []  # per-origin forecasts, for comparison (issue #50)
     for h in HORIZONS:
         a = np.array(records[h]["actual"])
         v = np.array(records[h]["vecm"])
@@ -430,8 +433,15 @@ def evaluate_vecm(
             "vecm_beats_var_bic_mae": bool(mae_v < mae_vb),
         })
         raw[h] = (a, v, va, vb, nv)
+        forecast_parts.append(pd.DataFrame({
+            "origin_date": records[h]["origin_date"], "horizon": h,
+            "actual": a, "vecm": v, "var_aic": va, "var_bic": vb, "naive": nv,
+        }))
 
-    return pd.DataFrame(rows), raw
+    forecasts = pd.concat(forecast_parts, ignore_index=True) if forecast_parts else pd.DataFrame(
+        columns=["origin_date", "horizon", "actual", "vecm", "var_aic", "var_bic", "naive"]
+    )
+    return pd.DataFrame(rows), raw, forecasts
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +453,10 @@ def dm_report_vecm(raw: dict) -> pd.DataFrame:
     Run DM tests comparing VECM against naive, VAR-AIC, and VAR-BIC.
     Uses Harvey-corrected, Bartlett-kernel long-run variance (h-1 truncation)
     matching the existing VAR baselines' dm_report() (issues #43, #44).
+
+    Computes the actual test via the shared `pairwise_dm()` (src/model_comparison.py)
+    so this and #28's dm_report() don't each hand-maintain their own copy of the same
+    dm_test() call parameters.
     """
     rows: list[dict] = []
 
@@ -451,26 +465,15 @@ def dm_report_vecm(raw: dict) -> pd.DataFrame:
         row: dict = {"horizon_days": h}
 
         for name, alt in comparisons.items():
-            dm_sq, p_sq = dm_test(
-                actual, vecm, alt,
-                loss=lambda u, v: (u - v) ** 2,
-                h=h, harvey_correction=True, variance_estimator="bartlett",
-            )
-            dm_abs, p_abs = dm_test(
-                actual, vecm, alt,
-                loss=lambda u, v: abs(u - v),
-                h=h, harvey_correction=True, variance_estimator="bartlett",
-            )
-
-            row[f"dm_vecm_{name}_stat_sq"] = round(dm_sq, 3)
-            row[f"dm_vecm_{name}_p_sq"] = round(p_sq, 4)
-            row[f"dm_vecm_{name}_stat_abs"] = round(dm_abs, 3)
-            row[f"dm_vecm_{name}_p_abs"] = round(p_abs, 4)
-            # Verdicts: negative DM stat means model 1 (VECM) is better
-            row[f"vecm_sig_better_{name}_rmse"] = bool(p_sq < ALPHA and dm_sq < 0)
-            row[f"{name}_sig_better_vecm_rmse"] = bool(p_sq < ALPHA and dm_sq > 0)
-            row[f"vecm_sig_better_{name}_mae"] = bool(p_abs < ALPHA and dm_abs < 0)
-            row[f"{name}_sig_better_vecm_mae"] = bool(p_abs < ALPHA and dm_abs > 0)
+            r = pairwise_dm(actual, vecm, alt, h)
+            row[f"dm_vecm_{name}_stat_sq"] = r["dm_stat_squared_loss"]
+            row[f"dm_vecm_{name}_p_sq"] = r["dm_p_value_squared_loss"]
+            row[f"dm_vecm_{name}_stat_abs"] = r["dm_stat_absolute_loss"]
+            row[f"dm_vecm_{name}_p_abs"] = r["dm_p_value_absolute_loss"]
+            row[f"vecm_sig_better_{name}_rmse"] = r["a_significantly_better_rmse"]
+            row[f"{name}_sig_better_vecm_rmse"] = r["b_significantly_better_rmse"]
+            row[f"vecm_sig_better_{name}_mae"] = r["a_significantly_better_mae"]
+            row[f"{name}_sig_better_vecm_mae"] = r["b_significantly_better_mae"]
 
         rows.append(row)
 
@@ -535,6 +538,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
         "vecm_fit": None,
         "eval_metrics": None,
         "eval_raw": None,
+        "eval_forecasts": None,
         "dm_results": None,
     }
 
@@ -564,7 +568,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     # -- Step 6: Expanding-window evaluation --
     print(f"\n[6/7] Expanding-window evaluation "
           f"(MIN_TRAIN={MIN_TRAIN}, STEP={STEP}, h={HORIZONS})...")
-    eval_metrics, eval_raw = evaluate_vecm(
+    eval_metrics, eval_raw, eval_forecasts = evaluate_vecm(
         levels=levels,
         diffed=diffed,
         k_ar_diff=k_ar_diff,
@@ -576,34 +580,31 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     print("\n" + eval_metrics.to_string(index=False))
     result["eval_metrics"] = eval_metrics
     result["eval_raw"] = eval_raw
+    result["eval_forecasts"] = eval_forecasts
 
     # -- Step 7: Diebold-Mariano tests --
     print(f"\n[7/7] Diebold-Mariano significance tests (4-way comparison)...")
     dm_results = dm_report_vecm(eval_raw)
     result["dm_results"] = dm_results
 
-    # Print verdicts
+    # Print verdicts. Built via the shared plain_language_verdict() decision tree
+    # (src/model_comparison.py) instead of a second hand-maintained copy of it --
+    # this file's own inline copy was missing the "mixed result" branch (RMSE and
+    # MAE significant but disagreeing on the winner), which silently printed a
+    # one-sided verdict when that happened. Found in PR #64 review.
     for _, row in dm_results.iterrows():
         h = int(row["horizon_days"])
         verdicts = []
         for rival in ["naive", "var_aic", "var_bic"]:
-            v_rmse = row.get(f"vecm_sig_better_{rival}_rmse", False)
-            v_mae = row.get(f"vecm_sig_better_{rival}_mae", False)
-            r_rmse = row.get(f"{rival}_sig_better_vecm_rmse", False)
-            r_mae = row.get(f"{rival}_sig_better_vecm_mae", False)
-
-            if v_rmse and v_mae:
-                verdicts.append(f"VECM sig. better than {rival} (RMSE & MAE)")
-            elif r_rmse and r_mae:
-                verdicts.append(f"{rival} sig. better than VECM (RMSE & MAE)")
-            elif v_rmse or v_mae:
-                m = "RMSE" if v_rmse else "MAE"
-                verdicts.append(f"VECM better than {rival} on {m} only")
-            elif r_rmse or r_mae:
-                m = "RMSE" if r_rmse else "MAE"
-                verdicts.append(f"{rival} better than VECM on {m} only")
-            else:
-                verdicts.append(f"no sig. diff. vs {rival}")
+            verdict_row = {
+                "a_significantly_better_rmse": row.get(f"vecm_sig_better_{rival}_rmse", False),
+                "b_significantly_better_rmse": row.get(f"{rival}_sig_better_vecm_rmse", False),
+                "a_significantly_better_mae": row.get(f"vecm_sig_better_{rival}_mae", False),
+                "b_significantly_better_mae": row.get(f"{rival}_sig_better_vecm_mae", False),
+                "dm_p_value_squared_loss": row.get(f"dm_vecm_{rival}_p_sq"),
+                "dm_p_value_absolute_loss": row.get(f"dm_vecm_{rival}_p_abs"),
+            }
+            verdicts.append(f"vs {rival}: {plain_language_verdict(verdict_row, 'VECM', rival)}")
         print(f"  h={h}: {'; '.join(verdicts)}")
 
     return result
@@ -614,14 +615,19 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
 # ---------------------------------------------------------------------------
 
 def main():
-    out_dir = Path("outputs")
+    out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
 
-    # -- Run 5-variable system (primary) --
-    r5 = run_pipeline(FEATURE_SET_5VAR, "5-variable system")
-
-    # -- Run 6-variable robustness check --
+    # -- Run 6-variable system (primary) --
+    # 6-var (+ usdcad) is the proposal-correct feature set shared with ARIMA/VAR-AIC/
+    # VAR-BIC/LSTM as of the Aug 19 usdcad decision (M2_CHECKLIST.md) -- it's what
+    # this VECM is scored on for cross-model comparison (issue #50).
     r6 = run_pipeline(FEATURE_SET_6VAR, "6-variable system (+ usdcad)")
+
+    # -- Run 5-variable robustness check --
+    # Domestic-only system, matching VAR-AIC/VAR-BIC's original (pre-Aug-19) feature
+    # set; also preserves more Johansen test power at this sample size.
+    r5 = run_pipeline(FEATURE_SET_5VAR, "5-variable system")
 
     # -- Save outputs --
     print(f"\n{'=' * 70}")
@@ -680,11 +686,17 @@ def main():
         )
         print("  -> vecm_diebold_mariano.csv")
 
+    # Per-origin forecasts for the 6-variable (primary) system, for cross-model comparison
+    # (issue #50) -- 5var (robustness check) isn't exported since #50 doesn't need it.
+    if r6["eval_forecasts"] is not None and not r6["eval_forecasts"].empty:
+        r6["eval_forecasts"].to_csv(out_dir / "r3_vecm_6var_forecasts.csv", index=False)
+        print("  -> r3_vecm_6var_forecasts.csv")
+
     # Summary
     print(f"\n{'=' * 70}")
     print("  SUMMARY")
     print(f"{'=' * 70}")
-    for r in [r5, r6]:
+    for r in [r6, r5]:
         rank = r["primary_rank"]
         if rank == 0:
             print(f"  {r['label']}: r=0 (no cointegration) -> VECM not estimated")

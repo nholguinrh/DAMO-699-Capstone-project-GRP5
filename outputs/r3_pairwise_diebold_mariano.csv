@@ -1,0 +1,64 @@
+horizon,model_a,model_b,pipeline_pair,n_forecasts,insufficient_sample,dm_stat_squared_loss,dm_p_value_squared_loss,dm_stat_absolute_loss,dm_p_value_absolute_loss,a_significantly_better_rmse,b_significantly_better_rmse,a_significantly_better_mae,b_significantly_better_mae,verdict
+1,arima_aic,arima_bic,same,698,False,1.487,0.1376,2.278,0.023,False,False,False,True,arima_bic significantly better than the rival on MAE only (p=0.0230); RMSE not significant
+1,arima_aic,lstm,cross,663,False,0.445,0.6567,1.819,0.0693,False,False,False,False,no significant difference on either RMSE or MAE
+1,arima_aic,var_aic,same,698,False,-3.51,0.0005,-2.639,0.0085,True,False,True,False,arima_aic significantly better than var_aic (RMSE and MAE agree)
+1,arima_aic,var_bic,same,698,False,1.488,0.1373,2.283,0.0227,False,False,False,True,var_bic significantly better than the rival on MAE only (p=0.0227); RMSE not significant
+1,arima_aic,vecm,cross,128,False,0.621,0.5359,0.294,0.769,False,False,False,False,no significant difference on either RMSE or MAE
+1,arima_bic,lstm,cross,663,False,-0.832,0.4055,-0.566,0.5715,False,False,False,False,no significant difference on either RMSE or MAE
+1,arima_bic,var_aic,same,698,False,-3.885,0.0001,-3.313,0.001,True,False,True,False,arima_bic significantly better than var_aic (RMSE and MAE agree)
+1,arima_bic,var_bic,same,698,False,0.833,0.4052,2.558,0.0107,False,False,False,True,var_bic significantly better than the rival on MAE only (p=0.0107); RMSE not significant
+1,arima_bic,vecm,cross,128,False,-0.03,0.9763,-0.71,0.479,False,False,False,False,no significant difference on either RMSE or MAE
+1,naive,arima_aic,same,698,False,-1.589,0.1125,-2.952,0.0033,False,False,True,False,naive significantly better than the rival on MAE only (p=0.0033); RMSE not significant
+1,naive,arima_bic,same,698,False,-0.665,0.5062,-2.509,0.0123,False,False,True,False,naive significantly better than the rival on MAE only (p=0.0123); RMSE not significant
+1,naive,lstm,same,3713,False,-1.485,0.1376,-7.614,0.0,False,False,True,False,naive significantly better than the rival on MAE only (p=0.0000); RMSE not significant
+1,naive,var_aic,same,698,False,-3.876,0.0001,-3.582,0.0004,True,False,True,False,naive significantly better than var_aic (RMSE and MAE agree)
+1,naive,var_bic,same,698,False,-0.664,0.507,-2.507,0.0124,False,False,True,False,naive significantly better than the rival on MAE only (p=0.0124); RMSE not significant
+1,naive,vecm,same,742,False,-2.417,0.0159,-3.745,0.0002,True,False,True,False,naive significantly better than vecm (RMSE and MAE agree)
+1,var_aic,lstm,cross,663,False,3.684,0.0002,3.029,0.0026,False,True,False,True,lstm significantly better than var_aic (RMSE and MAE agree)
+1,var_aic,var_bic,same,698,False,3.885,0.0001,3.314,0.001,False,True,False,True,var_bic significantly better than var_aic (RMSE and MAE agree)
+1,var_aic,vecm,cross,128,False,1.153,0.2512,0.439,0.6613,False,False,False,False,no significant difference on either RMSE or MAE
+1,var_bic,lstm,cross,663,False,-0.835,0.4041,-0.575,0.5657,False,False,False,False,no significant difference on either RMSE or MAE
+1,var_bic,vecm,cross,128,False,-0.03,0.9764,-0.711,0.4786,False,False,False,False,no significant difference on either RMSE or MAE
+1,vecm,lstm,cross,742,False,2.36,0.0185,3.13,0.0018,False,True,False,True,lstm significantly better than vecm (RMSE and MAE agree)
+5,arima_aic,arima_bic,same,698,False,2.002,0.0456,0.957,0.3387,False,True,False,False,arima_bic significantly better than the rival on RMSE only (p=0.0456); MAE not significant
+5,arima_aic,lstm,cross,512,False,2.671,0.0078,1.766,0.078,False,True,False,False,lstm significantly better than the rival on RMSE only (p=0.0078); MAE not significant
+5,arima_aic,var_aic,same,698,False,-1.572,0.1164,-1.97,0.0492,False,False,True,False,arima_aic significantly better than the rival on MAE only (p=0.0492); RMSE not significant
+5,arima_aic,var_bic,same,698,False,2.007,0.0452,0.96,0.3373,False,True,False,False,var_bic significantly better than the rival on RMSE only (p=0.0452); MAE not significant
+5,arima_aic,vecm,cross,94,False,0.609,0.5438,0.89,0.3756,False,False,False,False,no significant difference on either RMSE or MAE
+5,arima_bic,lstm,cross,512,False,0.935,0.3501,1.331,0.1837,False,False,False,False,no significant difference on either RMSE or MAE
+5,arima_bic,var_aic,same,698,False,-2.148,0.032,-2.23,0.0261,True,False,True,False,arima_bic significantly better than var_aic (RMSE and MAE agree)
+5,arima_bic,var_bic,same,698,False,1.591,0.1121,0.92,0.3579,False,False,False,False,no significant difference on either RMSE or MAE
+5,arima_bic,vecm,cross,94,False,0.357,0.7216,0.485,0.6289,False,False,False,False,no significant difference on either RMSE or MAE
+5,naive,arima_aic,same,698,False,-2.232,0.0259,-1.052,0.2931,True,False,False,False,naive significantly better than the rival on RMSE only (p=0.0259); MAE not significant
+5,naive,arima_bic,same,698,False,-1.309,0.191,-0.608,0.5433,False,False,False,False,no significant difference on either RMSE or MAE
+5,naive,lstm,same,3713,False,-0.826,0.4091,-0.812,0.4166,False,False,False,False,no significant difference on either RMSE or MAE
+5,naive,var_aic,same,698,False,-2.242,0.0253,-2.234,0.0258,True,False,True,False,naive significantly better than var_aic (RMSE and MAE agree)
+5,naive,var_bic,same,698,False,-1.307,0.1917,-0.606,0.5446,False,False,False,False,no significant difference on either RMSE or MAE
+5,naive,vecm,same,742,False,-2.164,0.0308,-2.091,0.0369,True,False,True,False,naive significantly better than vecm (RMSE and MAE agree)
+5,var_aic,lstm,cross,512,False,1.72,0.0861,1.947,0.0521,False,False,False,False,no significant difference on either RMSE or MAE
+5,var_aic,var_bic,same,698,False,2.149,0.032,2.231,0.026,False,True,False,True,var_bic significantly better than var_aic (RMSE and MAE agree)
+5,var_aic,vecm,cross,94,False,0.169,0.8664,0.473,0.6375,False,False,False,False,no significant difference on either RMSE or MAE
+5,var_bic,lstm,cross,512,False,0.925,0.3555,1.327,0.185,False,False,False,False,no significant difference on either RMSE or MAE
+5,var_bic,vecm,cross,94,False,0.356,0.7227,0.484,0.6296,False,False,False,False,no significant difference on either RMSE or MAE
+5,vecm,lstm,cross,742,False,2.054,0.0404,1.728,0.0844,False,True,False,False,lstm significantly better than the rival on RMSE only (p=0.0404); MAE not significant
+20,arima_aic,arima_bic,same,698,False,1.725,0.0851,1.632,0.1031,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_aic,lstm,cross,103,False,2.61,0.0104,1.522,0.131,False,True,False,False,lstm significantly better than the rival on RMSE only (p=0.0104); MAE not significant
+20,arima_aic,var_aic,same,698,False,0.984,0.3256,0.305,0.7607,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_aic,var_bic,same,698,False,1.739,0.0824,1.642,0.1009,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_aic,vecm,cross,18,True,,,,,False,False,False,False,insufficient sample (n=18) to run the DM test at this horizon
+20,arima_bic,lstm,cross,103,False,1.294,0.1985,0.923,0.3582,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_bic,var_aic,same,698,False,0.667,0.5051,-0.15,0.8808,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_bic,var_bic,same,698,False,1.386,0.1662,1.005,0.3151,False,False,False,False,no significant difference on either RMSE or MAE
+20,arima_bic,vecm,cross,18,True,,,,,False,False,False,False,insufficient sample (n=18) to run the DM test at this horizon
+20,naive,arima_aic,same,698,False,-1.384,0.1667,-1.254,0.2104,False,False,False,False,no significant difference on either RMSE or MAE
+20,naive,arima_bic,same,698,False,-1.173,0.2414,-1.023,0.3066,False,False,False,False,no significant difference on either RMSE or MAE
+20,naive,lstm,same,3713,False,-1.106,0.2688,-0.665,0.5062,False,False,False,False,no significant difference on either RMSE or MAE
+20,naive,var_aic,same,698,False,-0.177,0.8597,-0.804,0.4216,False,False,False,False,no significant difference on either RMSE or MAE
+20,naive,var_bic,same,698,False,-1.171,0.2421,-1.023,0.3068,False,False,False,False,no significant difference on either RMSE or MAE
+20,naive,vecm,same,742,False,0.414,0.6792,0.594,0.5528,False,False,False,False,no significant difference on either RMSE or MAE
+20,var_aic,lstm,cross,103,False,1.101,0.2737,1.226,0.2231,False,False,False,False,no significant difference on either RMSE or MAE
+20,var_aic,var_bic,same,698,False,-0.659,0.5103,0.156,0.8759,False,False,False,False,no significant difference on either RMSE or MAE
+20,var_aic,vecm,cross,18,True,,,,,False,False,False,False,insufficient sample (n=18) to run the DM test at this horizon
+20,var_bic,lstm,cross,103,False,1.256,0.2119,0.912,0.3641,False,False,False,False,no significant difference on either RMSE or MAE
+20,var_bic,vecm,cross,18,True,,,,,False,False,False,False,insufficient sample (n=18) to run the DM test at this horizon
+20,vecm,lstm,cross,742,False,-0.763,0.4455,-0.833,0.405,False,False,False,False,no significant difference on either RMSE or MAE

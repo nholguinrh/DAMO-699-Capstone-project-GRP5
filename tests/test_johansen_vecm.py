@@ -278,7 +278,7 @@ class TestVECMEstimationAndEvaluation:
         diffed = synthetic_cointegrated_levels.diff().dropna()
         diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
 
-        metrics_df, raw = evaluate_vecm(
+        metrics_df, raw, forecasts_df = evaluate_vecm(
             levels=synthetic_cointegrated_levels,
             diffed=diffed,
             k_ar_diff=1,
@@ -297,6 +297,8 @@ class TestVECMEstimationAndEvaluation:
         assert len(raw[1]) == 5
         actual, vecm, var_aic, var_bic, naive = raw[1]
         assert len(actual) == len(vecm) == len(var_aic) == len(var_bic) == len(naive)
+        assert isinstance(forecasts_df, pd.DataFrame)
+        assert "origin_date" in forecasts_df.columns
 
     def test_evaluate_vecm_with_lagged_bic(self, synthetic_cointegrated_levels, monkeypatch):
         """Validates evaluate_vecm when bic_lag_diff=1 (VAR model)."""
@@ -308,7 +310,7 @@ class TestVECMEstimationAndEvaluation:
         diffed = synthetic_cointegrated_levels.diff().dropna()
         diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
 
-        metrics_df, raw = evaluate_vecm(
+        metrics_df, raw, forecasts_df = evaluate_vecm(
             levels=synthetic_cointegrated_levels,
             diffed=diffed,
             k_ar_diff=1,

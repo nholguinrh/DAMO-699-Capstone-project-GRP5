@@ -115,6 +115,77 @@ Decision: restore `usdcad` as the 6th predictor everywhere. Applied Aug 19:
 All three models now share the same proposal-correct 6-variable feature set, which is what makes
 `#50`'s eventual pairwise Diebold-Mariano comparison across Naive/ARIMA/VAR/VECM/LSTM valid.
 
+**Aug 20 correction — off-by-one in `#28`'s (`src/EDA_VAR_AIC _lag _order.py`) forecast origin
+anchor, found while building `#50`'s cross-model alignment.** `evaluate()` anchored `last_level`
+(and therefore both the naive and VAR forecast base) on `level_idx_for_diff_row[origin]`, which
+resolves to the differenced row just *past* the training cutoff — `train = diffed.iloc[:origin]`
+excludes that row, so the anchor was reading one business day of otherwise-unseen level data into
+every origin, and #28's origin grid never lined up date-for-date with #29/ARIMA/VECM's (0 dates in
+common, verified). Fixed to `level_idx_for_diff_row[origin - 1]`, the last row `train` actually
+contains — origin dates now match #29/ARIMA exactly (2,094/2,094 rows, `actual`/`naive` identical
+to the bit). Substantive finding is unchanged (VAR does not beat naive at any horizon), but the
+significance got *stronger*, not weaker: h=1 and h=5 now both show naive significantly better than
+VAR-AIC on RMSE and MAE (previously only MAE at h=1, nothing at h=5). Regenerated
+`outputs/r3_patha_rmse_mae_vs_naive.csv` and `outputs/r3_patha_diebold_mariano.csv`; added
+`outputs/r3_patha_var_aic_forecasts.csv` (per-origin forecasts, previously not exported) so #50 can
+merge on `origin_date`.
+
+**Aug 20 — `#50` (pairwise Diebold-Mariano across all Round 3 baselines) shipped.** Seven arms
+compared pairwise at all three horizons — Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC, VAR-BIC, VECM
+(6-var), LSTM (21 pairs x 3 horizons = 63 tests, `notebooks/04_diagnostics/dm_pairwise_comparison.ipynb`,
+`outputs/r3_pairwise_diebold_mariano.csv`). Decisions made along the way:
+
+- ARIMA-AIC and ARIMA-BIC kept as separate arms, mirroring the VAR-AIC/VAR-BIC sensitivity-check
+  precedent above — no forced winner.
+- VECM scored on its 6-variable system only, not the 5-variable system PR #59 calls "primary" —
+  the 6-var set matches ARIMA/VAR-AIC/VAR-BIC/LSTM's proposal-correct feature set per the Aug 19
+  usdcad decision.
+- LSTM's forecasts restricted to the same calendar span as the other baselines before comparison
+  (its rolling-CV folds cover ~3,728 origins vs. everyone else's ~698-750).
+- Discovered mid-build: ARIMA/VAR-AIC/VAR-BIC (`load_levels()`) and VECM/LSTM
+  (`build_gold_features()`) run on two different, unreconciled calendars — cross-pipeline pairs
+  need explicit verification to avoid silently pairing forecasts against the wrong outcome. Filed
+  as `#63`, not fixed here — #50's numbers are correct for the samples reported, just
+  smaller-sample for VECM/LSTM pairs than the same-pipeline ones.
+
+**Aug 20/21 — pre-review fix pass on `#50`'s PR (#64), before sending for review.** A deep review
+caught that the cross-pipeline verification above (comparing `actual` values with a float
+tolerance) wasn't sufficient: `build_gold_features()` forward-fills yield levels before computing
+the target spread, so ~16% of `gold_features.csv` rows repeat their prior value, and two genuinely
+different real target dates can coincidentally carry the same `actual` value — 12 of 30
+ARIMA-AIC-vs-VECM rows at h=20 were silently mispaired this way. Replaced with real verification:
+`src/model_comparison.py`'s `attach_target_date()` walks each pipeline's own calendar forward
+`horizon` positions from `origin_date` and requires the two sides' real target dates to match, not
+just their `actual` values — correctly shrinks the ARIMA-vs-VECM h=20 sample to 18 origins (below
+`dieboldmariano`'s minimum for h=20, now reported as `insufficient_sample` instead of crashing or
+silently accepting false ties). Also fixed in the same pass: an off-by-one risk from thin
+cross-pipeline samples hitting `dm_test()`'s exception path uncaught; a cwd-relative vs.
+project-root-absolute path mismatch between the forecast-producing scripts and the comparison
+module; `notebooks/03_models/johansen_vecm.ipynb` had silently drifted out of sync with
+`evaluate_vecm()`'s signature and could no longer run; and `src/johansen_vecm.py`'s own inline
+verdict-printing loop was missing the "mixed RMSE/MAE result" branch that `#43` was originally
+filed to fix elsewhere — consolidated `dm_report()` (`EDA_VAR_AIC`), `dm_report_vecm()`
+(`johansen_vecm`), and both files' verdict loops onto the one shared `pairwise_dm()` /
+`plain_language_verdict()` in `model_comparison.py` so this doesn't drift a third time. All
+re-verified against a fresh top-to-bottom notebook run and the full test suite; substantive
+findings unchanged.
+
+**Result:** no model significantly beats Naive in the direction that would support a
+forecasting-improvement claim, at any horizon, consistent with each baseline's own individual
+finding. h=20 has almost no significant pairwise results anywhere in the table.
+
+**Aug 21 correction — `#47` (`johansen_vecm.ipynb`) relabeled to match the Aug 19 `usdcad`
+decision.** PR #59 called the 5-variable domestic system "Primary" and treated 6-variable
+(+ `usdcad`) as a secondary robustness check — an oversight, not a reviewed choice: the Aug 19
+decision above restored `usdcad` as the 6th predictor "everywhere," and #28/#29/#49 were fixed
+that day, but #47 wasn't caught since PR #59 merged the next day (Aug 20) without cross-checking
+against it. Flagged during #64's review since the mismatched framing was confusing readers about
+which VECM feeds #50's cross-model DM scoring. Swapped: the 6-variable system is now #47's primary
+computation path (Section 2/6-8), 5-variable domestic-only is now the robustness check (Section 9).
+`src/johansen_vecm.py`'s `main()` reordered to match. Both systems still find r=1 cointegrating
+vector and estimate cleanly — this is a relabeling/reordering, not a substantive result change;
+`outputs/*.csv` are byte-identical before and after.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's

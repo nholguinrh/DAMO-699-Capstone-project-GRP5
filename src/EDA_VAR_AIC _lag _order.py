@@ -54,8 +54,9 @@ from statsmodels.tsa.stattools import adfuller
 # date -- so this is silenced rather than left to print hundreds of times.
 warnings.filterwarnings("ignore", category=Warning, module="statsmodels")
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from project_paths import PROCESSED_DIR  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_paths import PROCESSED_DIR, PROJECT_ROOT  # noqa: E402
+from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
 
 # ----------------------------------------------------------------------------
 # Config
@@ -147,7 +148,7 @@ def select_aic_lag(diffed: pd.DataFrame) -> int:
 # 4. Random Walk benchmark + AIC-VAR, evaluated in LEVELS at each horizon
 # ----------------------------------------------------------------------------
 
-def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.DataFrame, dict]:
+def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """
     Expanding-window evaluation. At each origin t (indexed into `levels`, offset by 1
     to line up with `diffed`):
@@ -165,7 +166,7 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     level_idx_for_diff_row = {i: levels.index.get_loc(diffed.index[i]) for i in range(len(diffed))}
 
     max_h = max(HORIZONS)
-    records = {h: {"actual": [], "var_pred": [], "naive_pred": []} for h in HORIZONS}
+    records = {h: {"actual": [], "var_pred": [], "naive_pred": [], "origin_date": []} for h in HORIZONS}
 
     n = len(diffed)
     for origin in range(MIN_TRAIN, n - max_h, STEP):
@@ -179,8 +180,18 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
         fc_target_diffs = fc[:, diff_target_idx]
         cum_fc = np.cumsum(fc_target_diffs)  # cumulative reconstructed level change
 
-        level_pos = level_idx_for_diff_row[origin]
+        # Issue #50 review: was level_idx_for_diff_row[origin], which resolves to
+        # diffed.index[origin] -- one row PAST the training cutoff (train = diffed.iloc[:origin]
+        # excludes that row). That silently anchored last_level/naive one business day later
+        # than the actual last training observation, leaking an otherwise-unseen level into both
+        # the naive and VAR forecasts and desyncing this script's origin grid from every sibling
+        # baseline's (ARIMA/VAR-BIC/VECM), which all anchor on the last row actually in train.
+        # Fixed to origin - 1, the last row diffed.iloc[:origin] actually contains. Substantive
+        # finding (VAR does not beat naive at any horizon) is unchanged; RMSE/MAE shift slightly
+        # -- see M2_CHECKLIST.md.
+        level_pos = level_idx_for_diff_row[origin - 1]
         last_level = levels[TARGET].iloc[level_pos]
+        origin_date = levels.index[level_pos]
 
         for h in HORIZONS:
             future_pos = level_pos + h
@@ -193,9 +204,11 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
             records[h]["actual"].append(actual_level)
             records[h]["var_pred"].append(var_level_pred)
             records[h]["naive_pred"].append(naive_level_pred)
+            records[h]["origin_date"].append(origin_date)
 
     rows = []
     raw = {}  # h -> (actual, var_pred, naive_pred) arrays, for the DM test in step 5
+    forecast_parts = []  # per-origin forecasts, for cross-model comparison (issue #50)
     for h in HORIZONS:
         actual = np.array(records[h]["actual"])
         var_pred = np.array(records[h]["var_pred"])
@@ -220,8 +233,15 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
             "var_beats_naive_mae": bool(mae_var < mae_naive),
         })
         raw[h] = (actual, var_pred, naive_pred)
+        forecast_parts.append(pd.DataFrame({
+            "origin_date": records[h]["origin_date"], "horizon": h,
+            "actual": actual, "var_aic": var_pred, "naive": naive_pred,
+        }))
 
-    return pd.DataFrame(rows), raw
+    forecasts = pd.concat(forecast_parts, ignore_index=True) if forecast_parts else pd.DataFrame(
+        columns=["origin_date", "horizon", "actual", "var_aic", "naive"]
+    )
+    return pd.DataFrame(rows), raw, forecasts
 
 
 # ----------------------------------------------------------------------------
@@ -249,44 +269,37 @@ def dm_report(raw: dict) -> pd.DataFrame:
     Fixes issue #43: the original version derived var_significantly_better /
     naive_significantly_better from dm_p_value_squared_loss (RMSE test) only, even
     though dm_p_value_absolute_loss (MAE test) is computed and written to the CSV
-    right alongside it. At h=1, the RMSE test isn't significant (p=0.1177) but the
-    MAE test is (p=0.0005, naive wins) -- that result was silently dropped from the
-    summary verdict, even though it's the strongest significant finding in the table.
+    right alongside it -- reports both loss types' verdicts separately below, plus
+    an overall verdict requiring agreement between them. (Exact p-values depend on
+    the current evaluate() output -- see M2_CHECKLIST.md's decision log for the
+    latest numbers and the Aug 20 off-by-one fix that changed them, rather than
+    hardcoding an example here that would go stale the next time evaluate() changes.)
 
-  
+    Computes the actual test via the shared `pairwise_dm()` (src/model_comparison.py)
+    so this and #47's dm_report_vecm() don't each hand-maintain their own copy of the
+    same dm_test() call parameters (h, harvey_correction, variance_estimator, ALPHA).
     """
     rows = []
     for h, (actual, var_pred, naive_pred) in raw.items():
-        dm_rmse, p_rmse = dm_test(
-            actual, var_pred, naive_pred,
-            loss=lambda u, v: (u - v) ** 2,
-            h=h, harvey_correction=True, variance_estimator="bartlett",
-        )
-        dm_mae, p_mae = dm_test(
-            actual, var_pred, naive_pred,
-            loss=lambda u, v: abs(u - v),
-            h=h, harvey_correction=True, variance_estimator="bartlett",
-        )
-
-        var_better_rmse = bool(p_rmse < ALPHA and dm_rmse < 0)
-        naive_better_rmse = bool(p_rmse < ALPHA and dm_rmse > 0)
-        var_better_mae = bool(p_mae < ALPHA and dm_mae < 0)
-        naive_better_mae = bool(p_mae < ALPHA and dm_mae > 0)
-
+        r = pairwise_dm(actual, var_pred, naive_pred, h)
         rows.append({
             "horizon_days": h,
-            "dm_stat_squared_loss": round(dm_rmse, 3),
-            "dm_p_value_squared_loss": round(p_rmse, 4),
-            "dm_stat_absolute_loss": round(dm_mae, 3),
-            "dm_p_value_absolute_loss": round(p_mae, 4),
+            "dm_stat_squared_loss": r["dm_stat_squared_loss"],
+            "dm_p_value_squared_loss": r["dm_p_value_squared_loss"],
+            "dm_stat_absolute_loss": r["dm_stat_absolute_loss"],
+            "dm_p_value_absolute_loss": r["dm_p_value_absolute_loss"],
             # Per-loss-type verdicts -- neither is derived from the other.
-            "var_significantly_better_rmse": var_better_rmse,
-            "naive_significantly_better_rmse": naive_better_rmse,
-            "var_significantly_better_mae": var_better_mae,
-            "naive_significantly_better_mae": naive_better_mae,
+            "var_significantly_better_rmse": r["a_significantly_better_rmse"],
+            "naive_significantly_better_rmse": r["b_significantly_better_rmse"],
+            "var_significantly_better_mae": r["a_significantly_better_mae"],
+            "naive_significantly_better_mae": r["b_significantly_better_mae"],
             # Overall verdict: only "significant" when both loss functions agree.
-            "var_significantly_better": bool(var_better_rmse and var_better_mae),
-            "naive_significantly_better": bool(naive_better_rmse and naive_better_mae),
+            "var_significantly_better": bool(
+                r["a_significantly_better_rmse"] and r["a_significantly_better_mae"]
+            ),
+            "naive_significantly_better": bool(
+                r["b_significantly_better_rmse"] and r["b_significantly_better_mae"]
+            ),
         })
     return pd.DataFrame(rows)
 
@@ -314,7 +327,7 @@ def main():
 
     print(f"\n[4/5] Building Random Walk benchmark + VAR(AIC lag={aic_lag}), "
           f"scoring RMSE/MAE at {HORIZONS}-day horizons in levels (proposal §5.4)...")
-    results, raw = evaluate(levels, diffed, aic_lag)
+    results, raw, forecasts = evaluate(levels, diffed, aic_lag)
     print("\n" + results.to_string(index=False))
 
     print("\n[5/5] Diebold-Mariano test: is the RMSE/MAE gap significant, or noise?")
@@ -322,41 +335,30 @@ def main():
     print("\n" + dm_results.to_string(index=False))
     for _, row in dm_results.iterrows():
         h = int(row["horizon_days"])
-        if row["var_significantly_better"]:
-            verdict = "VAR significantly better than naive (both RMSE and MAE agree)"
-        elif row["naive_significantly_better"]:
-            verdict = "naive significantly better than VAR (both RMSE and MAE agree)"
-        elif (
-            (row["var_significantly_better_rmse"] and
-             row["naive_significantly_better_mae"])
-            or
-            (row["naive_significantly_better_rmse"] and
-             row["var_significantly_better_mae"])
-        ):
-            verdict = (
-                "mixed result: RMSE and MAE are both significant "
-                "but identify different winning models"
-            )
-        elif row["var_significantly_better_rmse"] or row["naive_significantly_better_rmse"]:
-            winner = "VAR" if row["var_significantly_better_rmse"] else "naive"
-            verdict = (f"{winner} significantly better on RMSE only "
-                       f"(p_rmse={row['dm_p_value_squared_loss']:.4f}) -- MAE test not "
-                       f"significant, don't headline this as a robust result")
-        elif row["var_significantly_better_mae"] or row["naive_significantly_better_mae"]:
-            winner = "VAR" if row["var_significantly_better_mae"] else "naive"
-            verdict = (f"{winner} significantly better on MAE only "
-                       f"(p_mae={row['dm_p_value_absolute_loss']:.4f}) -- RMSE test not "
-                       f"significant, don't headline this as a robust result")
-        else:
-            verdict = "no significant difference on either RMSE or MAE"
+        # Remap dm_report()'s var_*/naive_* field names onto plain_language_verdict()'s
+        # generic a_*/b_* contract so the verdict text is built by the one shared
+        # decision tree (src/model_comparison.py) instead of a second hand-maintained
+        # copy of it -- see issue #60/PR #64 review, which found this exact
+        # duplication let a "mixed result" branch go missing in a sibling copy.
+        verdict_row = {
+            "a_significantly_better_rmse": row["var_significantly_better_rmse"],
+            "b_significantly_better_rmse": row["naive_significantly_better_rmse"],
+            "a_significantly_better_mae": row["var_significantly_better_mae"],
+            "b_significantly_better_mae": row["naive_significantly_better_mae"],
+            "dm_p_value_squared_loss": row["dm_p_value_squared_loss"],
+            "dm_p_value_absolute_loss": row["dm_p_value_absolute_loss"],
+        }
+        verdict = plain_language_verdict(verdict_row, "VAR", "naive")
         print(f"  h={h}: {verdict}")
 
-    out_dir = Path("outputs")
+    out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
     results.to_csv(out_dir / "r3_patha_rmse_mae_vs_naive.csv", index=False)
     dm_results.to_csv(out_dir / "r3_patha_diebold_mariano.csv", index=False)
+    forecasts.to_csv(out_dir / "r3_patha_var_aic_forecasts.csv", index=False)
     print(f"\nSaved: {out_dir}/r3_patha_rmse_mae_vs_naive.csv, "
-          f"{out_dir}/r3_patha_diebold_mariano.csv")
+          f"{out_dir}/r3_patha_diebold_mariano.csv, "
+          f"{out_dir}/r3_patha_var_aic_forecasts.csv")
 
 
 if __name__ == "__main__":
