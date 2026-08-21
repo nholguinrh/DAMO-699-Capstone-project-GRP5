@@ -618,11 +618,16 @@ def main():
     out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
 
-    # -- Run 5-variable system (primary) --
-    r5 = run_pipeline(FEATURE_SET_5VAR, "5-variable system")
-
-    # -- Run 6-variable robustness check --
+    # -- Run 6-variable system (primary) --
+    # 6-var (+ usdcad) is the proposal-correct feature set shared with ARIMA/VAR-AIC/
+    # VAR-BIC/LSTM as of the Aug 19 usdcad decision (M2_CHECKLIST.md) -- it's what
+    # this VECM is scored on for cross-model comparison (issue #50).
     r6 = run_pipeline(FEATURE_SET_6VAR, "6-variable system (+ usdcad)")
+
+    # -- Run 5-variable robustness check --
+    # Domestic-only system, matching VAR-AIC/VAR-BIC's original (pre-Aug-19) feature
+    # set; also preserves more Johansen test power at this sample size.
+    r5 = run_pipeline(FEATURE_SET_5VAR, "5-variable system")
 
     # -- Save outputs --
     print(f"\n{'=' * 70}")
@@ -681,9 +686,8 @@ def main():
         )
         print("  -> vecm_diebold_mariano.csv")
 
-    # Per-origin forecasts for the 6-variable system, for cross-model comparison (issue #50) --
-    # 5var isn't exported since #50 uses the 6var system to match ARIMA/VAR-AIC/VAR-BIC/LSTM's
-    # proposal-correct feature set (see M2_CHECKLIST.md's Aug 19 usdcad entry).
+    # Per-origin forecasts for the 6-variable (primary) system, for cross-model comparison
+    # (issue #50) -- 5var (robustness check) isn't exported since #50 doesn't need it.
     if r6["eval_forecasts"] is not None and not r6["eval_forecasts"].empty:
         r6["eval_forecasts"].to_csv(out_dir / "r3_vecm_6var_forecasts.csv", index=False)
         print("  -> r3_vecm_6var_forecasts.csv")
@@ -692,7 +696,7 @@ def main():
     print(f"\n{'=' * 70}")
     print("  SUMMARY")
     print(f"{'=' * 70}")
-    for r in [r5, r6]:
+    for r in [r6, r5]:
         rank = r["primary_rank"]
         if rank == 0:
             print(f"  {r['label']}: r=0 (no cointegration) -> VECM not estimated")

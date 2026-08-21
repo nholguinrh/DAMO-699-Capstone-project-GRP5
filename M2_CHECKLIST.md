@@ -174,6 +174,18 @@ findings unchanged.
 forecasting-improvement claim, at any horizon, consistent with each baseline's own individual
 finding. h=20 has almost no significant pairwise results anywhere in the table.
 
+**Aug 21 correction — `#47` (`johansen_vecm.ipynb`) relabeled to match the Aug 19 `usdcad`
+decision.** PR #59 called the 5-variable domestic system "Primary" and treated 6-variable
+(+ `usdcad`) as a secondary robustness check — an oversight, not a reviewed choice: the Aug 19
+decision above restored `usdcad` as the 6th predictor "everywhere," and #28/#29/#49 were fixed
+that day, but #47 wasn't caught since PR #59 merged the next day (Aug 20) without cross-checking
+against it. Flagged during #64's review since the mismatched framing was confusing readers about
+which VECM feeds #50's cross-model DM scoring. Swapped: the 6-variable system is now #47's primary
+computation path (Section 2/6-8), 5-variable domestic-only is now the robustness check (Section 9).
+`src/johansen_vecm.py`'s `main()` reordered to match. Both systems still find r=1 cointegrating
+vector and estimate cleanly — this is a relabeling/reordering, not a substantive result change;
+`outputs/*.csv` are byte-identical before and after.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
