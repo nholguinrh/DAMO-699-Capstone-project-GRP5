@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Jupyter checkpoint dirs
+**/.ipynb_checkpoints/
+
 # Environment secrets (each teammate creates their own — see .env.example)
 .env
 
