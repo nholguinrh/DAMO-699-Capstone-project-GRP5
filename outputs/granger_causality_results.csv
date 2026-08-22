@@ -1,0 +1,7 @@
+causing,caused,test_statistic,crit_value,df_num,df_denom,p_value,reject_h0,plain_language
+overnight_rate,yield_spread_10y_2y,1.0479031492326785,1.789029284661554,11,25098,0.4002764310224268,False,No evidence overnight_rate Granger-causes yield_spread_10y_2y (p=0.4003 >= 0.05)
+fed_funds_rate,yield_spread_10y_2y,1.4957255159081946,1.789029284661554,11,25098,0.12521169187750103,False,No evidence fed_funds_rate Granger-causes yield_spread_10y_2y (p=0.1252 >= 0.05)
+usdcad,yield_spread_10y_2y,1.2752190677683612,1.789029284661554,11,25098,0.23155783369010846,False,No evidence usdcad Granger-causes yield_spread_10y_2y (p=0.2316 >= 0.05)
+overnight_rate,us_treasury_10y,2.0447664910793804,1.789029284661554,11,25098,0.020864582205632056,True,overnight_rate Granger-causes us_treasury_10y (p=0.0209 < 0.05)
+fed_funds_rate,us_treasury_10y,2.0634037100590388,1.789029284661554,11,25098,0.019532834091707002,True,fed_funds_rate Granger-causes us_treasury_10y (p=0.0195 < 0.05)
+usdcad,us_treasury_10y,0.881997134241645,1.789029284661554,11,25098,0.5573901519171589,False,No evidence usdcad Granger-causes us_treasury_10y (p=0.5574 >= 0.05)
