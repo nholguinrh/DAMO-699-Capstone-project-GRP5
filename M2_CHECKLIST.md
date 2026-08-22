@@ -202,10 +202,16 @@ vector and estimate cleanly — this is a relabeling/reordering, not a substanti
 - [x] Round 3 decision recorded above
 - [x] Feature engineering (Lerneir) consolidates a single Gold-layer pipeline in `src/` informed by
       both EDA approaches and both baseline attempts — not a third independent attempt
-- [ ] Outcome/early-results plan (Nelson) is a short, honest account of what converged and what's
+- [x] Outcome/early-results plan (Nelson) is a short, honest account of what converged and what's
       still open, not a polished narrative that hides the rounds that didn't get a full answer
+      (verified against `docs/M2_OUTCOME_PLAN.md`, Aug 22 — its content matches this bar; note it's
+      dated Aug 16 and its "not started" table is now stale for #47/#48/#49/#50)
 - [ ] Every notebook re-runs clean, top-to-bottom, from a fresh kernel, with committed outputs —
-      no notebook that only works if cells are run out of order
+      no notebook that only works if cells are run out of order (checked execution-count sequencing
+      Aug 22: 8/9 notebooks are clean and monotonic from a fresh kernel; `arima_baseline.ipynb`'s
+      execution counts start at 5 and skip 18, meaning it wasn't run fresh top-to-bottom in its
+      current committed state — outputs still look internally consistent, but this hasn't been
+      re-verified with an actual fresh-kernel run)
 - [x] `src/` has real functions in it (`gold_feature_pipeline.py`, `orchestrator.py`, `clients/`)
       with clean CLI execution and unit testing
 

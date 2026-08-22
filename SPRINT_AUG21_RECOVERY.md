@@ -41,49 +41,59 @@ LSTM cannot be meaningfully evaluated before VAR exists (per §5.3 — it's the 
 not a substitute), so nothing after Round 3 can front-run Round 3.
 
 ### Fri Aug 14 (today)
-- `[ ]` Commit + PR the pending `TIMELINE.md` / `M2_CHECKLIST.md` edits recording the Aug 09 sync decisions — **Nelson**
-- `[ ]` Publish this file, confirm owner assignments at today's sync — **Nelson**
-- `[ ]` Open tracking issues for the 6 methodology gaps (Johansen/VECM, IRF/FEVD/Granger, LSTM+SHAP, Diebold-Mariano, TCPS cert, final dashboard) — **Nelson**
-- `[ ]` Start TCPS 2 certification (self-paced, ~1–2h each) — **All**, target done by Mon Aug 17
-- `[~]` Round 3 AIC-VAR implementation continues, reusing ADF/stationarity results already in `01_eda` — **Giti**
-- `[~]` Round 3 BIC-VAR implementation continues — **Mitchel**
+- `[x]` Commit + PR the pending `TIMELINE.md` / `M2_CHECKLIST.md` edits recording the Aug 09 sync decisions — **Nelson** (PR #46, merged)
+- `[~]` Publish this file, confirm owner assignments at today's sync — **Nelson** (file published via PR #41; the sync itself isn't verifiable from the repo alone — see Aug 22 status note below)
+- `[x]` Open tracking issues for the 6 methodology gaps (Johansen/VECM, IRF/FEVD/Granger, LSTM+SHAP, Diebold-Mariano, TCPS cert, final dashboard) — **Nelson** (#47, #48, #49, #50, #51, #52 all opened Aug 16)
+- `[ ]` Start TCPS 2 certification (self-paced, ~1–2h each) — **All**, target done by Mon Aug 17 (no certificate evidence anywhere in the repo as of Aug 22 — see #51, still open)
+- `[x]` Round 3 AIC-VAR implementation continues, reusing ADF/stationarity results already in `01_eda` — **Giti** (#28 closed, PR #42)
+- `[x]` Round 3 BIC-VAR implementation continues — **Mitchel** (#29 closed, PR #45)
 
 ### Sat Aug 15
-- `[~]` Feature engineering: consolidate Gold-layer pipeline in `src/` (#30) — **Lerneir**
-- `[~]` Outcome/early-results plan skeleton (#31), structured but not yet filled with real numbers — **Nelson**
-- `[ ]` Fix #37 (redact FRED key from retry logs, drop dead StatCan URL) if bandwidth allows — **Lerneir** (low priority, non-blocking per Aug 09 decision)
+- `[x]` Feature engineering: consolidate Gold-layer pipeline in `src/` (#30) — **Lerneir** (closed, PR #55)
+- `[x]` Outcome/early-results plan skeleton (#31), structured but not yet filled with real numbers — **Nelson** (closed, PR #53 — content verified honest against `M2_CHECKLIST.md`'s "What NOT to do" bar; see Aug 22 status note)
+- `[x]` Fix #37 (redact FRED key from retry logs, drop dead StatCan URL) if bandwidth allows — **Lerneir** (closed, PR #56 — got done despite being flagged low-priority/optional)
 
 ### Sun Aug 16
-- `[ ]` Round 3 PRs opened for #28/#29 — **Giti, Mitchel**
-- `[ ]` Round 3 review (Nelson reviews AIC path, Lerneir reviews BIC path per `M2_CHECKLIST.md`'s reviewer pairing)
-- `[ ]` Short sync: converge Round 3 decision — pick one or keep both as sensitivity check (checklist's own fallback) — **All**
-- `[~]` Johansen cointegration test on Gold-layer level series — **Lerneir** (can start once feature eng lands)
+- `[x]` Round 3 PRs opened for #28/#29 — **Giti, Mitchel** (PR #42, PR #45)
+- `[x]` Round 3 review (Nelson reviews AIC path, Lerneir reviews BIC path per `M2_CHECKLIST.md`'s reviewer pairing) (verified: PR #42 approved by Nelson, PR #45 approved by Lerneir)
+- `[x]` Short sync: converge Round 3 decision — pick one or keep both as sensitivity check (checklist's own fallback) — **All** (decision recorded in `M2_CHECKLIST.md`: keeping both as a sensitivity check)
+- `[x]` Johansen cointegration test on Gold-layer level series — **Lerneir** (#47 closed, PR #59; r=1 cointegrating vector found, VECM estimated)
 
 ### Mon Aug 17 — `TIMELINE.md` Week 7 begins
-- `[ ]` M2 formally closes: Round 3 decision recorded in `M2_CHECKLIST.md`, feature eng + outcome plan merged, `data/README.md` TBD resolved, `README.md` Roadmap line updated off "Phase 0" — **Nelson**
-- `[ ]` Confirm all 4 members' TCPS 2 certificates — **All**
-- `[~]` VECM estimated (only if Johansen found cointegration) — **Lerneir**
-- `[~]` IRF, FEVD, Granger causality computed on the chosen VAR/VECM — **Giti or Mitchel** (whichever path converged; both if kept as sensitivity check)
-- `[~]` ARIMA univariate baseline (Auto-ARIMA, AIC/BIC order selection) — **whichever of Giti/Mitchel isn't on VECM extension**
+- `[~]` M2 formally closes: Round 3 decision recorded in `M2_CHECKLIST.md`, feature eng + outcome plan merged, `data/README.md` TBD resolved, `README.md` Roadmap line updated off "Phase 0" — **Nelson** (first three sub-items done; `README.md`'s Roadmap line is the one still-open piece — as of Aug 22 it still reads "Phase 0 (Setup) · Next deadline: Proposal, Fri Jul 17")
+- `[ ]` Confirm all 4 members' TCPS 2 certificates — **All** (not done — #51 open, no evidence)
+- `[x]` VECM estimated (only if Johansen found cointegration) — **Lerneir** (done as part of #47/PR #59 above)
+- `[~]` IRF, FEVD, Granger causality computed on the chosen VAR/VECM — **Giti or Mitchel** (whichever path converged; both if kept as sensitivity check) — built and PR opened Aug 22 (#65, referencing #48), awaiting Lerneir's review — not yet merged
+- `[x]` ARIMA univariate baseline (Auto-ARIMA, AIC/BIC order selection) — **whichever of Giti/Mitchel isn't on VECM extension** (#54 closed, PR #57)
 
 ### Tue Aug 18
-- `[~]` LSTM: shallow architecture, rolling-window CV, dropout + early stopping — **Nelson**
-- `[~]` SHAP values wired to LSTM output — **Nelson**
-- (parallel, per `TIMELINE.md` — not gap-specific) chapters 02–03 drafting — **All**
+- `[x]` LSTM: shallow architecture, rolling-window CV, dropout + early stopping — **Nelson** (#49 closed, PR #58)
+- `[x]` SHAP values wired to LSTM output — **Nelson** (same PR #58)
+- (parallel, per `TIMELINE.md` — not gap-specific) chapters 02–03 drafting — **All** — `[ ]` **not started as of Aug 22**: `report/chapters/` contains only `NOTES.md`, no chapter drafts exist yet
 
 ### Wed Aug 19
-- `[ ]` Diebold-Mariano pairwise tests: Naive vs. ARIMA vs. VAR/VECM vs. LSTM, across 1/5/20-day horizons — **Nelson**
-- `[ ]` Diagnostics/validation batch (VIF, residual/fit tests, CV) per `TIMELINE.md` Wk7 — **model owners, each on their own model**
+- `[x]` Diebold-Mariano pairwise tests: Naive vs. ARIMA vs. VAR/VECM vs. LSTM, across 1/5/20-day horizons — **Nelson** (#50 closed, PR #64 — 63 pairwise tests across 7 model arms)
+- `[ ]` Diagnostics/validation batch (VIF, residual/fit tests, CV) per `TIMELINE.md` Wk7 — **model owners, each on their own model** — partially covered (LSTM has rolling-CV; ADF/cointegration diagnostics exist for VAR/VECM) but **no VIF check exists anywhere in the repo**, despite the Gold-layer feature store carrying exact multicollinearity (`yield_spread_10y_2y ≡ yield_10y − yield_2y`, and the two other spread columns) that a VIF pass would catch
 
 ### Thu Aug 20
-- `[ ]` Final executive Power BI dashboard updated with model forecasts, DM results, uncertainty framing — **Mitchel**
-- `[ ]` Outcome/early-results plan finalized with real numbers (honest about what did/didn't converge, per `M2_CHECKLIST.md`'s own "What NOT to do" guidance) — **Nelson**
-- `[!]` Hard checkpoint: any item still `[ ]` or `[~]` here gets flagged `blocked` per Standing Rule 3, not quietly carried
+- `[ ]` Final executive Power BI dashboard updated with model forecasts, DM results, uncertainty framing — **Mitchel** (#52 still open; `report/power bi/README.md` is still EDA-only — historical spread/yield/volatility charts, no model output ingested)
+- `[x]` Outcome/early-results plan finalized with real numbers (honest about what did/didn't converge, per `M2_CHECKLIST.md`'s own "What NOT to do" guidance) — **Nelson** (done as of Aug 16 per `docs/M2_OUTCOME_PLAN.md` — note its "what's still open" table is now stale: it lists #47/#48/#49/#50 as "not started," which was true Aug 16 but isn't anymore; worth a refresh note before report chapters cite it)
+- `[!]` Hard checkpoint: any item still `[ ]` or `[~]` here gets flagged `blocked` per Standing Rule 3, not quietly carried — **this checkpoint itself doesn't appear to have happened**; see Aug 22 status note
 
 ### Fri Aug 21 — sprint exit
 - `[ ]` Run this file's checklist end-to-end against `M2_CHECKLIST.md` DoD and `TIMELINE.md` Wk7 items
 - `[ ]` Retro: anything unclosed gets an explicit carry-forward note into Week 8, not a silent drop
 - `[ ]` Update `TIMELINE.md` Week 8 row if any carry-forward changes its scope
+
+**Aug 22 status note (this checklist reconciled against live GitHub + repo state, since the Aug 21
+sprint-exit sync didn't happen):** the three boxes above are still genuinely open — no dry run, no
+retro, no Week 8 update has occurred. Cross-checking everything above against GitHub issue/PR state
+directly (not just this file's own checkboxes) turned up two things worth flagging on their own:
+`#48` was checked off in the `#32` tracking issue before its PR (`#65`) existed — now corrected, PR
+opened and pending Lerneir's review — and this file's own checkboxes had drifted well behind actual
+merged work (most of Aug 15–20 was in fact completed on schedule). The real open items carried into
+Week 8 are: `#48` review/merge, `#51` (TCPS certs — no evidence for any member), `#52` (final
+dashboard — not started), the VIF/diagnostics gap, and chapters 02+ (report writing hasn't started).
 
 ---
 

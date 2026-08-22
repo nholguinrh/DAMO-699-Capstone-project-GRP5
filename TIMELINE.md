@@ -104,12 +104,12 @@ that sync:
 Remaining Week 6 (Aug 10–14) work:
 
 - `[x]` Round 3 baseline models converge (AIC vs. BIC lag order, or keep both) — Giti, Mitchel
-- `[ ]` Feature engineering: consolidated Gold-layer pipeline — Lerneir
-- `[ ]` Outcome / early-results plan — Nelson
-- `[ ]` Repo visibly shows: preprocessing, feature engineering, baseline models, early results (Student Guide Wk 5 list) — All
-- `[ ]` README status section updated; notebooks run top-to-bottom — 
-- `[ ]` Attend second online class — All
-- `[ ]` Harvest supervisor feedback into issues within 24h — 
+- `[x]` Feature engineering: consolidated Gold-layer pipeline — Lerneir (#30 closed, PR #55)
+- `[x]` Outcome / early-results plan — Nelson (#31 closed, PR #53)
+- `[x]` Repo visibly shows: preprocessing, feature engineering, baseline models, early results (Student Guide Wk 5 list) — All
+- `[!]` README status section updated; notebooks run top-to-bottom — README's "Roadmap at a Glance" still reads stale Phase-0 text as of Aug 22; notebooks are 8/9 clean, `arima_baseline.ipynb` not verified fresh (see `M2_CHECKLIST.md` DoD)
+- `[ ]` Attend second online class — All (unverifiable from repo)
+- `[x]` Harvest supervisor feedback into issues within 24h — (#22/#23, both closed)
 
 ## 7. Weeks 7–9 — Aug 17 – Sep 04 · Phase 3: modeling + report chapters
 
@@ -119,7 +119,7 @@ Week 7 is now the heavy week; watch it at daily standups per Standing Rule 3.
 
 Weekly rhythm (refine into daily rows at the start of each week):
 
-- **Wk 7 (Aug 17–21):** `[ ]` Author `final-report` skill —  · `[ ]` main models implemented —  · `[ ]` chapters 02–03 drafted —  · `[ ]` Diagnostics + validation (VIF, fit tests, CV as applicable) —  · `[ ]` chapter 04 drafted —  · `[ ]` figure artifacts batch 1 (chart + APA caption + interpretation ¶ each) — 
+- **Wk 7 (Aug 17–21):** `[ ]` Author `final-report` skill (not found in `.claude/skills/` as of Aug 22) —  · `[x]` main models implemented (ARIMA #54, VAR-AIC #28, VAR-BIC #29, VECM #47, LSTM+SHAP #49 all closed; IRF/FEVD/Granger #48 in PR review, #65) —  · `[ ]` chapters 02–03 drafted (`report/chapters/` has only `NOTES.md` as of Aug 22 — not started) —  · `[ ]` Diagnostics + validation (VIF, fit tests, CV as applicable) (partial — no VIF anywhere; see `M2_CHECKLIST.md`) —  · `[ ]` chapter 04 drafted (not started) —  · `[ ]` figure artifacts batch 1 (chart + APA caption + interpretation ¶ each) (`report/figures/` has only `NOTES.md` — not started) — 
 - **Wk 8 (Aug 24–28):** `[ ]` chapter 05 (analytics application) —  · `[ ]` chapter 06 (findings & discussion) —  · `[ ]` figure batch 2 — 
 - **Wk 9 (Aug 31–Sep 04):** `[ ]` chapter 07 (conclusion & recommendations) —  · `[ ]` chapters 08–09 (references, appendices) —  · `[ ]` **chapter 01 executive summary — written LAST, starts only when 02–07 merged** —  · `[ ]` all chapters through rubric gate
 

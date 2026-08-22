@@ -28,12 +28,12 @@ Specialized roles (lead, data, writing/QA) are assigned in the [Team Charter](./
 
 ## Roadmap at a Glance
  
-**Current status:** 🟢 On track — Phase 0 (Setup) · Next deadline: **Proposal, Fri Jul 17**
+**Current status:** 🟡 M2 (preliminary analysis) closing out — methodology-gap issues mostly closed (#47/#49/#50/#54), #48 in PR review, #51/#52 still open · Report writing (chapters 02+) not yet started · Next deadline: **Final Report + Dataset + repo, Sun Sep 13 (60%)**
  
 | Milestone | Due | Weight |
 |-----------|-----|--------|
-| Proposal | Fri **Jul 17** | 10% |
-| Preliminary analysis in repo (supervisor review) | Fri **Aug 07** | checkpoint |
+| Proposal | Fri **Jul 17** ✅ | 10% |
+| Preliminary analysis in repo (supervisor review) | Fri **Aug 14** (revised Aug 09 sync) | checkpoint |
 | Final Report + Dataset + repo | Sun **Sep 13** | **60%** |
 | Presentation deck | by Fri **Sep 11** | 10% |
 | Poster presentation | Week 11 (**Sep 14–18**, date TBD) | — |
