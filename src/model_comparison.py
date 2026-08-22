@@ -61,6 +61,7 @@ from dieboldmariano import (
     ZeroVarianceException,
     dm_test,
 )
+from statsmodels.stats.multitest import multipletests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_paths import PROJECT_ROOT  # noqa: E402
@@ -323,3 +324,84 @@ def plain_language_verdict(row: dict, name_a: str, name_b: str) -> str:
         p = row["dm_p_value_absolute_loss"]
         return f"{winner} significantly better than the rival on MAE only (p={p:.4f}); RMSE not significant"
     return "no significant difference on either RMSE or MAE"
+
+
+# ---------------------------------------------------------------------------
+# 4. Multiple-testing correction (issue #69)
+# ---------------------------------------------------------------------------
+
+def apply_multiplicity_correction(dm_all: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
+    """
+    Benjamini-Hochberg FDR correction across a full table of pairwise DM tests
+    (issue #69). At alpha=0.05 across the 63 tests #50 runs (21 pairs x 3
+    horizons), the raw family-wise error rate is 1-(1-0.05)**63 ~= 96% -- close
+    to guaranteed at least one "significant" result by chance alone, even if no
+    real pairwise differences exist anywhere. BH control is applied separately
+    per loss function (squared-loss p-values as one family, absolute-loss
+    p-values as another), matching how RMSE- and MAE-based verdicts are already
+    treated as independent tracks everywhere else in this module.
+
+    Adds `*_bh` columns alongside the existing raw ones -- doesn't overwrite or
+    drop the raw p-values/verdicts, since the raw numbers are still legitimate
+    to report next to the adjusted ones (transparency, not replacement). Rows
+    with `insufficient_sample=True` (no p-value to begin with) stay untestable
+    here too and get NaN adjusted p-values, non-significant adjusted flags, and
+    the same "insufficient sample" verdict text.
+
+    Expects the columns `dm_all` (as assembled by dm_pairwise_comparison.ipynb)
+    already has: `model_a`, `model_b`, `n_forecasts`, `insufficient_sample`,
+    `dm_stat_squared_loss`, `dm_p_value_squared_loss`, `dm_stat_absolute_loss`,
+    `dm_p_value_absolute_loss`.
+    """
+    out = dm_all.copy()
+
+    for loss in ("squared_loss", "absolute_loss"):
+        p_col = f"dm_p_value_{loss}"
+        p_adj_col = f"dm_p_adj_{loss}"
+        out[p_adj_col] = np.nan
+
+        testable = out[p_col].notna()
+        if testable.any():
+            _, p_adj, _, _ = multipletests(
+                out.loc[testable, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
+            )
+            out.loc[testable, p_adj_col] = p_adj
+
+    # Re-derive significance flags from the adjusted p-values, keeping the same
+    # dm_stat-sign convention pairwise_dm() uses: stat < 0 -> a better, > 0 -> b better.
+    out["a_significantly_better_rmse_bh"] = (
+        out["dm_p_adj_squared_loss"].notna()
+        & (out["dm_p_adj_squared_loss"] < alpha)
+        & (out["dm_stat_squared_loss"] < 0)
+    )
+    out["b_significantly_better_rmse_bh"] = (
+        out["dm_p_adj_squared_loss"].notna()
+        & (out["dm_p_adj_squared_loss"] < alpha)
+        & (out["dm_stat_squared_loss"] > 0)
+    )
+    out["a_significantly_better_mae_bh"] = (
+        out["dm_p_adj_absolute_loss"].notna()
+        & (out["dm_p_adj_absolute_loss"] < alpha)
+        & (out["dm_stat_absolute_loss"] < 0)
+    )
+    out["b_significantly_better_mae_bh"] = (
+        out["dm_p_adj_absolute_loss"].notna()
+        & (out["dm_p_adj_absolute_loss"] < alpha)
+        & (out["dm_stat_absolute_loss"] > 0)
+    )
+
+    def _adjusted_verdict(row: pd.Series) -> str:
+        adj_row = {
+            "insufficient_sample": row["insufficient_sample"],
+            "n_forecasts": row["n_forecasts"],
+            "a_significantly_better_rmse": row["a_significantly_better_rmse_bh"],
+            "b_significantly_better_rmse": row["b_significantly_better_rmse_bh"],
+            "a_significantly_better_mae": row["a_significantly_better_mae_bh"],
+            "b_significantly_better_mae": row["b_significantly_better_mae_bh"],
+            "dm_p_value_squared_loss": row["dm_p_adj_squared_loss"],
+            "dm_p_value_absolute_loss": row["dm_p_adj_absolute_loss"],
+        }
+        return plain_language_verdict(adj_row, row["model_a"], row["model_b"])
+
+    out["verdict_bh"] = out.apply(_adjusted_verdict, axis=1)
+    return out
