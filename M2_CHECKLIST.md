@@ -186,6 +186,43 @@ computation path (Section 2/6-8), 5-variable domestic-only is now the robustness
 vector and estimate cleanly — this is a relabeling/reordering, not a substantive result change;
 `outputs/*.csv` are byte-identical before and after.
 
+**Aug 22/23 — calendar reconciliation (`#63`), decision + two fixes.** ARIMA/VAR-AIC/VAR-BIC used
+to independently rebuild an inner-joined, no-fill daily frame (4,010 rows, 698 origins) instead of
+reading VECM/LSTM's canonical Gold-layer pipeline (`build_gold_features()`, 4,268 rows, outer join +
+`ffill(limit=2)`). Verified the two agreed exactly on every overlapping date (max diff ~2e-16) — the
+smaller frame was silently dropping 259 genuine US/CA market-holiday trading days, not disagreeing
+with Gold on a real value. **Decision: `build_gold_features()`/`gold_features.csv` is canonical.**
+ARIMA (`src/EDA_VAR_AIC _lag _order.py`'s `load_levels()`), VAR-AIC, and VAR-BIC (`arima_baseline.ipynb`,
+`var_bic_baseline.ipynb`) now all read it directly instead of rebuilding their own copy.
+
+Fixing the data source alone wasn't sufficient, though — it surfaced a second, independent bug:
+ARIMA/VAR-AIC/VAR-BIC's expanding-window loops counted an "origin" by how many *differenced*
+observations had been trained on, while `evaluate_vecm()` counts it by how many *level*
+observations — a permanent one-row phase offset between the two loop families for the same `origin`
+index number, unrelated to which calendar either read from. Before this fix, origin_date values
+from the two loop families coincided on only ~19% (133 of a possible ~700) of pairs, apparently by
+coincidence — holiday gaps in the old, smaller calendar occasionally broke the phase misalignment
+back into sync. After the calendar fix alone, that regularized calendar removed those occasional
+coincidental realignments and direct overlap actually dropped to 0%, which would have zeroed out
+every ARIMA/VAR-vs-VECM/LSTM comparison in `#50`. Fixed by re-anchoring ARIMA/VAR-AIC/VAR-BIC's
+loops onto VECM's level-counting convention (same three files) — origin_date now matches VECM
+750/750 at every horizon.
+
+Re-ran and re-verified all three baselines plus `#50`'s pairwise comparison end-to-end. Substantive
+findings unchanged throughout: VAR-AIC/VAR-BIC still don't beat naive at any horizon; ARIMA-AIC/BIC
+still don't either. Two genuine, not-previously-known findings surfaced along the way, not hidden:
+(1) with the larger sample, AIC now selects a mixed `ARIMA(2,0,3)` instead of the previous
+`ARIMA(0,0,5)`, and that specification's optimizer convergence rate is markedly worse (65% vs the
+previous order's 93%+) — makes `#71` (still open) more important, not less; retrying non-convergent
+fits with a higher iteration limit now recovers most of them (246/263, 94%), unlike before. (2) `#50`'s
+cross-pipeline sample sizes, previously shrunk to as few as 18 origins for some h=20 pairs, are now
+745–750 of 750 at every horizon for every pair (`insufficient_sample` is 0 for all 63 rows) — none of
+Round 3's headline findings ever rested on a thin cross-pipeline sample, but the comparisons
+themselves are meaningfully more complete now. `#50`'s pairwise notebook no longer needs
+`merge_cross_pipeline()`'s target-date check to actively trim rows for core/VECM pairs (kept as a
+safety net, not removed); LSTM cross-pairs still see a handful of boundary rows trimmed (745/750),
+an expected minor edge effect from LSTM's own rolling-CV date restriction, not a data problem.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's

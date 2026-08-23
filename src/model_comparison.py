@@ -5,34 +5,46 @@ DAMO-699 Capstone, Group 5
 Compares Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC, VAR-BIC, VECM (6-var), and LSTM
 pairwise at 1-/5-/20-day horizons, per proposal Section 5.4/Section 7.
 
-ARIMA/VAR-AIC/VAR-BIC share one data pipeline (src/EDA_VAR_AIC _lag _order.py's
-load_levels(), inner-joined, 698 origins) and agree bit-for-bit on origin_date,
-actual, and naive. VECM and LSTM are built on a different pipeline
-(src/gold_feature_pipeline.py's build_gold_features(), outer-joined + ffilled),
-which does not share the same business-day grid -- "5 trading days ahead" of
-the same origin_date can land on a different real calendar date depending on
-which grid produced it.
+As of issue #63, ARIMA/VAR-AIC/VAR-BIC (src/EDA_VAR_AIC _lag _order.py's load_levels())
+and VECM/LSTM (src/gold_feature_pipeline.py's build_gold_features()) all read the same
+canonical data/processed/gold_features.csv, and share one identical business-day
+calendar (verified: core_calendar()/vecm_calendar()/lstm_calendar() are index-identical
+over their common range) -- 750 origins each for ARIMA/VAR-AIC/VAR-BIC/VECM, LSTM's own
+larger rolling-CV calendar covers it as a strict superset. Before #63, ARIMA/VAR-AIC/
+VAR-BIC instead independently rebuilt an inner-joined, no-fill frame (698 origins) that
+silently disagreed with build_gold_features()'s outer-join + ffill(limit=2) -- "5
+trading days ahead" of the same origin_date could land on a different real calendar
+date depending on which pipeline produced it.
 
-Any comparison crossing the two pipeline families is therefore verified by
-walking each side's own calendar forward `horizon` positions from `origin_date`
-and requiring the resulting real target date to match on both sides (see
-`attach_target_date` / `merge_cross_pipeline` below) -- not by comparing the
-`actual` values themselves. An earlier version of this module did compare
-`actual` with a float tolerance instead; that check is not sufficient proof of
-a same-calendar target, because build_gold_features() forward-fills yield
-levels before the target spread is computed (~16% of rows in gold_features.csv
-repeat their immediately-prior value), so two genuinely different real target
-dates can coincidentally carry the same `actual` value and pass a value-based
-check. Verified on the shipped PR #64 output: 12 of 30 ARIMA-AIC-vs-VECM rows
-at h=20 had matching `actual` values but different real target dates. Target-
-date verification closes that gap outright, rather than narrowing the window
-for it.
+Any cross-pipeline comparison is still verified by walking each side's own calendar
+forward `horizon` positions from `origin_date` and requiring the resulting real target
+date to match on both sides (see `attach_target_date` / `merge_cross_pipeline` below)
+-- not by comparing the `actual` values themselves. An earlier version of this module
+did compare `actual` with a float tolerance instead; that check is not sufficient proof
+of a same-calendar target, because build_gold_features() forward-fills yield levels
+before the target spread is computed (~16% of rows in gold_features.csv repeat their
+immediately-prior value), so two genuinely different real target dates can
+coincidentally carry the same `actual` value and pass a value-based check. Verified on
+the shipped PR #64 output: 12 of 30 ARIMA-AIC-vs-VECM rows at h=20 had matching `actual`
+values but different real target dates.
 
-This still shrinks the usable sample for cross-pipeline pairs relative to
-same-pipeline ones (reported per-pair as n_forecasts, not assumed constant
-across the comparison table) but keeps every surviving pair genuinely paired.
-Reconciling the two pipelines onto one shared calendar end-to-end is a bigger
-fix, tracked separately (issue #63).
+#63 also fixed a separate, deeper disagreement in what "origin" means, found while
+fixing the calendar-*source* one: ARIMA/VAR-AIC/VAR-BIC's loops used to define an origin
+by how many *differenced* observations it had trained on (`train_diff = diffed.iloc[:origin]`),
+while evaluate_vecm()'s loop defines it by how many *level* observations it has trained
+on (`train_levels = levels.iloc[:origin]`) -- a one-row phase offset for the identical
+`origin` index number, since one differenced observation is "used up" reconstructing the
+first level. On the newly-unified calendar this meant origin_date values from the two
+loop families stopped coinciding almost entirely (0 of 750x750 pairs shared an
+origin_date, down from the ~19%/133 that happened to coincide against the old, less
+regular inner-joined calendar -- ffill(limit=2) makes the calendar *more* strictly
+periodic, which removes the holiday irregularities that used to occasionally break the
+phase alignment back into sync). merge_cross_pipeline()'s inner join is on `origin_date`
+first, so this phase offset -- not target-date mismatch -- was what would have zeroed out
+every ARIMA/VAR-vs-VECM/LSTM pairwise comparison. Fixed by re-anchoring
+ARIMA/VAR-AIC/VAR-BIC's loops onto the same level-counting convention evaluate_vecm()
+uses (`src/EDA_VAR_AIC _lag _order.py`'s `evaluate()`, `arima_baseline.ipynb`,
+`var_bic_baseline.ipynb`) -- verified: origin_date now matches 750/750 against VECM.
 """
 
 from __future__ import annotations
@@ -70,8 +82,9 @@ _RESERVED_COLS = {"origin_date", "horizon", "actual", "naive", "target_date"}
 def load_core() -> pd.DataFrame:
     """
     Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC, VAR-BIC all share one pipeline
-    (load_levels(), 698 origins). Merges them into one frame -- exact-matching
-    on (origin_date, horizon), verified bit-identical actual/naive across all
+    (load_levels(), 750 origins as of issue #63 -- was 698 before the Gold-layer
+    calendar migration). Merges them into one frame -- exact-matching on
+    (origin_date, horizon), verified bit-identical actual/naive across all
     three source files, so no row is dropped here.
     """
     arima = pd.read_csv(OUT_DIR / "r3_arima_forecasts.csv", parse_dates=["origin_date"])
@@ -114,7 +127,7 @@ def load_vecm(date_min=None, date_max=None) -> pd.DataFrame:
 def load_lstm(date_min=None, date_max=None) -> pd.DataFrame:
     """
     LSTM's rolling-CV folds cover ~3,728 origins, far more than the other
-    baselines' 698-750 -- restrict to a shared calendar span before comparison
+    baselines' 750 -- restrict to a shared calendar span before comparison
     (see issue #50 decision log) so LSTM isn't scored on years the other
     baselines were never evaluated on. Same date_min/date_max contract as
     load_vecm(), applied consistently rather than only to this one arm.

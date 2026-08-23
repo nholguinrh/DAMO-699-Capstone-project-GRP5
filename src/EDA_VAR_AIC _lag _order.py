@@ -34,6 +34,17 @@ the squared-loss (RMSE) p-value, silently dropping absolute-loss (MAE) significa
 results from the summary. Now reports both loss types' verdicts separately, plus an
 overall verdict requiring agreement between them -- see dm_report() for detail.
 
+Aug 22 correction (issue #63): load_levels() used to rebuild its own inner-joined,
+no-fill daily frame from the raw BoC/FRED/CPI sources -- 4,010 rows, a calendar that
+silently disagreed with VECM/LSTM's Gold-layer pipeline (4,268 rows, outer join +
+ffill(limit=2) across US/CA market holidays), which #50's cross-model comparison had
+to work around instead of every pipeline sharing one calendar. Verified the two were
+otherwise identical: on the 4,009 overlapping dates every FEATURE_SET value matched
+Gold's to floating-point precision, so this was 259 genuine trading days being dropped
+for no modeling reason, not a real disagreement to reconcile. Now reads
+data/processed/gold_features.csv directly, selecting the same FEATURE_SET columns --
+same downstream differencing/evaluation logic, larger and more complete sample.
+
 Run: pip install dieboldmariano   (per reviewer comment 2, then)   python 03_var_baseline_path_a.py
 Reads from data/processed/ via src/project_paths.py, same as the rest of the repo.
 """
@@ -74,39 +85,18 @@ ALPHA = 0.05
 
 
 # ----------------------------------------------------------------------------
-# 1. Load + merge the three Round 1 processed sources
+# 1. Load the canonical Gold-layer feature set (issue #63)
 # ----------------------------------------------------------------------------
 
 def load_levels() -> pd.DataFrame:
-    boc = pd.read_csv(PROCESSED_DIR / "bank_of_canada_data.csv", parse_dates=["date"])
-    fred = pd.read_csv(PROCESSED_DIR / "fred_rates.csv", parse_dates=["date"])
-    cpi = pd.read_csv(PROCESSED_DIR / "statcan_cpi.csv",
-                       parse_dates=["reference_month", "release_date"])
-
-    df = (boc[["date", "overnight_rate", "yield_spread_10y_2y", "usdcad"]]
-          .merge(fred[["date", "us_treasury_10y", "fed_funds_rate"]], on="date", how="inner")
-          .sort_values("date")
-          .set_index("date"))
-
-    # cpi_yoy: pct_change(12) on reference-month order (not on the raw CPI index level),
-    # then forward-filled onto the daily grid keyed on release_date -- a print only
-    # becomes real information on the day StatCan actually publishes it. Mirrors
-    # 01_eda.ipynb §2/§8; the raw statcan_cpi.csv only ships cpi_all_items, so cpi_yoy
-    # is computed here rather than read directly.
-    cpi_sorted = cpi.sort_values("reference_month").copy()
-    cpi_sorted["cpi_yoy"] = cpi_sorted["cpi_all_items"].pct_change(12) * 100
-    # Two reference months have no mapped release_date (the known unmappable-month
-    # allowlist from Round 1's config/cpi_release_dates.csv) -- drop those rows before
-    # building the daily grid; they can't be forward-filled without a release date.
-    cpi_sorted = cpi_sorted.dropna(subset=["release_date"])
-    cpi_by_release = (cpi_sorted.sort_values("release_date")
-                       .drop_duplicates(subset="release_date", keep="last")
-                       .set_index("release_date")["cpi_yoy"])
-    daily_grid = pd.date_range(df.index.min(), df.index.max(), freq="D")
-    cpi_yoy_daily = cpi_by_release.reindex(daily_grid).ffill()
-    df["cpi_yoy"] = cpi_yoy_daily.reindex(df.index)
-
-    df = df[FEATURE_SET].dropna()
+    """
+    FEATURE_SET, read from the canonical Gold-layer CSV (src/gold_feature_pipeline.py,
+    issue #30) rather than rebuilt from raw sources -- the same calendar VECM and LSTM
+    already evaluate against (issue #63), instead of a separately-maintained inner-join
+    that silently dropped 259 genuine trading days neither of those two ever dropped.
+    """
+    gold = pd.read_csv(PROCESSED_DIR / "gold_features.csv", parse_dates=["date"])
+    df = gold.set_index("date").sort_index()[FEATURE_SET].dropna()
     return df
 
 
@@ -161,16 +151,21 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     target_diff_col = f"d_{TARGET}"
     diff_target_idx = diffed.columns.get_loc(target_diff_col)
 
-    # diffed.index[i] corresponds to the change ending on levels.index[i+1]
-    # (levels has one more row than diffed, since diff() drops the first obs).
-    level_idx_for_diff_row = {i: levels.index.get_loc(diffed.index[i]) for i in range(len(diffed))}
-
     max_h = max(HORIZONS)
     records = {h: {"actual": [], "var_pred": [], "naive_pred": [], "origin_date": []} for h in HORIZONS}
 
-    n = len(diffed)
+    # Issue #63 follow-up: origin is now counted in LEVEL observations trained on
+    # (train = levels.iloc[:origin], last_level/origin_date = levels.iloc[origin - 1]),
+    # matching evaluate_vecm()'s convention exactly instead of counting DIFFERENCED
+    # observations trained on (the previous train = diffed.iloc[:origin] anchored
+    # last_level one row earlier for the same `origin` number -- a permanent one-row
+    # phase offset from VECM's origin grid that no calendar fix could close, since it's
+    # a training-size convention mismatch, not a data-source one). diffed.iloc[i] is the
+    # change ending on levels.iloc[i+1], so training on `origin` levels uses `origin - 1`
+    # diffs.
+    n = len(levels)
     for origin in range(MIN_TRAIN, n - max_h, STEP):
-        train = diffed.iloc[:origin]
+        train = diffed.iloc[:origin - 1]
         try:
             fitted = VAR(train).fit(lag)
         except (ValueError, np.linalg.LinAlgError):
@@ -180,21 +175,11 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
         fc_target_diffs = fc[:, diff_target_idx]
         cum_fc = np.cumsum(fc_target_diffs)  # cumulative reconstructed level change
 
-        # Issue #50 review: was level_idx_for_diff_row[origin], which resolves to
-        # diffed.index[origin] -- one row PAST the training cutoff (train = diffed.iloc[:origin]
-        # excludes that row). That silently anchored last_level/naive one business day later
-        # than the actual last training observation, leaking an otherwise-unseen level into both
-        # the naive and VAR forecasts and desyncing this script's origin grid from every sibling
-        # baseline's (ARIMA/VAR-BIC/VECM), which all anchor on the last row actually in train.
-        # Fixed to origin - 1, the last row diffed.iloc[:origin] actually contains. Substantive
-        # finding (VAR does not beat naive at any horizon) is unchanged; RMSE/MAE shift slightly
-        # -- see M2_CHECKLIST.md.
-        level_pos = level_idx_for_diff_row[origin - 1]
-        last_level = levels[TARGET].iloc[level_pos]
-        origin_date = levels.index[level_pos]
+        last_level = levels[TARGET].iloc[origin - 1]
+        origin_date = levels.index[origin - 1]
 
         for h in HORIZONS:
-            future_pos = level_pos + h
+            future_pos = origin - 1 + h
             if future_pos >= len(levels):
                 continue
             actual_level = levels[TARGET].iloc[future_pos]
