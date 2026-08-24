@@ -223,6 +223,35 @@ themselves are meaningfully more complete now. `#50`'s pairwise notebook no long
 safety net, not removed); LSTM cross-pairs still see a handful of boundary rows trimmed (745/750),
 an expected minor edge effect from LSTM's own rolling-CV date restriction, not a data problem.
 
+**Aug 24 — `d_cpi_yoy` moved to exogenous in VAR-AIC (`#72`), decision + empirical check.**
+`d_cpi_yoy` (monthly CPI, forward-filled onto the daily grid then first-differenced) is exactly
+0.0 on ~95.5% of rows, jumping only on the ~192 real release dates — a spike train, not a
+continuous innovation like the other five differenced series in `EDA_VAR_AIC _lag _order.py`'s
+`FEATURE_SET`. Letting it sit inside the same endogenous VAR system risked AIC lag-order search
+latching onto the release calendar's ~21-trading-day periodicity as real cross-series dynamics,
+and the issue's own suggested alternative feature set for a related check (`#70`) turned out to be
+exactly collinear once tried, underscoring that this feature set hadn't been stress-tested before.
+**Decision: `d_cpi_yoy` is now passed to `VAR(..., exog=...)` as an exogenous regressor** (`EXOG_COLS`
+/ `_split_endog_exog()`) rather than a sixth endogenous series — it still enters each endogenous
+equation's contemporaneous relationship, it just no longer participates in lag-order search or
+gets its own dynamics equation. Its unknowable future value is forecast with its own
+expanding-window mean at each origin (not the last observed value or an assumed trend).
+
+Re-ran `EDA_VAR_AIC _lag _order.py` end-to-end after the fix: AIC still selects lag 10 (unchanged).
+RMSE/MAE shift only in the 4th decimal place; DM p-values move slightly (e.g. h=1 MAE
+p=0.0001 → p=0.0000) but **no verdict changes anywhere** — naive is still significantly better at
+h=1 and h=5 (RMSE and MAE agree both before and after), no significant difference at h=20, same as
+every prior Round 3 VAR reading. The fix is methodologically correct and now documented, but
+doesn't overturn any existing Round 3 finding.
+
+**Not yet applied to VAR-BIC (`#29`, `var_bic_baseline.ipynb`) or VECM (`#47`,
+`src/johansen_vecm.py`)** — both still treat `cpi_yoy` as fully endogenous/short-run-differenced.
+VAR-BIC is a notebook (needs a fresh top-to-bottom re-run, not just a code edit, per this
+checklist's still-open `arima_baseline.ipynb` execution-order flag above); VECM's short-run
+dynamics term (`Γ_i Δy_{t-i}`) would need its own validation that moving `cpi_yoy` to exogenous
+doesn't disturb the Johansen rank test's cointegrating relationship. Left as follow-up scope
+rather than bundled silently into this fix — see `#72`.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's

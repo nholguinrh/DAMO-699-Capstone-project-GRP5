@@ -45,6 +45,20 @@ for no modeling reason, not a real disagreement to reconcile. Now reads
 data/processed/gold_features.csv directly, selecting the same FEATURE_SET columns --
 same downstream differencing/evaluation logic, larger and more complete sample.
 
+Aug 24 fix (issue #72): `d_cpi_yoy` (monthly CPI, forward-filled onto the daily grid
+then first-differenced) is exactly 0.0 on ~95.5% of rows, with a jump only on the
+~192 real release dates -- a spike train, not a continuous innovation like the other
+five differenced series, and letting it sit inside the same endogenous VAR system
+risked AIC/BIC lag-order search latching onto the release calendar's ~21-trading-day
+periodicity as if it were real cross-series dynamics. `d_cpi_yoy` is now passed to
+`VAR(..., exog=...)` as an exogenous regressor instead of a sixth endogenous series --
+see `EXOG_COLS`/`_split_endog_exog()` below. It still enters each endogenous
+equation's contemporaneous relationship, it just no longer participates in lag-order
+search or has its own dynamics equation. Its true future value (a CPI print) isn't
+knowable at forecast time, so `evaluate()` forecasts it with its own expanding-window
+mean (issue #72's DM comparison against the prior all-endogenous treatment is in
+`M2_CHECKLIST.md`'s Aug 24 entry).
+
 Run: pip install dieboldmariano   (per reviewer comment 2, then)   python 03_var_baseline_path_a.py
 Reads from data/processed/ via src/project_paths.py, same as the rest of the repo.
 """
@@ -76,6 +90,11 @@ from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
 TARGET = "yield_spread_10y_2y"
 FEATURE_SET = ["yield_spread_10y_2y", "overnight_rate", "us_treasury_10y",
                "fed_funds_rate", "cpi_yoy", "usdcad"]
+
+# Issue #72: d_cpi_yoy is a release-day spike train (~95.5% exactly 0.0), not a
+# continuous innovation -- treated as exogenous rather than a sixth endogenous
+# series. See _split_endog_exog() and the module docstring's Aug 24 entry.
+EXOG_COLS = ["d_cpi_yoy"]
 
 HORIZONS = [1, 5, 20]     # trading days, per proposal §5.4
 MAX_LAG_SEARCH = 15
@@ -111,6 +130,14 @@ def to_differenced(levels: pd.DataFrame) -> pd.DataFrame:
 
 
 def confirm_stationary(diffed: pd.DataFrame) -> None:
+    """
+    Note (issue #72): ADF trivially "passes" for d_cpi_yoy -- a series that's
+    constant 0.0 on ~95.5% of rows with a handful of release-day jumps will always
+    look stationary to ADF, without being a well-behaved continuous innovation like
+    the other five series. This check confirms no unit root, not that every column
+    is equally well-behaved -- see _split_endog_exog()/EXOG_COLS for how d_cpi_yoy
+    is actually handled downstream.
+    """
     for col in diffed.columns:
         _, pval, *_ = adfuller(diffed[col], autolag="AIC")
         if pval >= ALPHA:
@@ -121,12 +148,26 @@ def confirm_stationary(diffed: pd.DataFrame) -> None:
     print(f"  All {len(diffed.columns)} series confirmed stationary post-differencing (p<0.05).")
 
 
+def _split_endog_exog(diffed: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """
+    Issue #72: pulls EXOG_COLS (d_cpi_yoy) out of the endogenous VAR system into a
+    separate exogenous regressor frame. Returns (endog, exog), exog=None if no
+    EXOG_COLS are present in `diffed` (e.g. the yield-only feature set in #70,
+    which never includes cpi_yoy in the first place).
+    """
+    exog_cols = [c for c in EXOG_COLS if c in diffed.columns]
+    endog = diffed.drop(columns=exog_cols)
+    exog = diffed[exog_cols] if exog_cols else None
+    return endog, exog
+
+
 # ----------------------------------------------------------------------------
 # 3. AIC lag order selection
 # ----------------------------------------------------------------------------
 
 def select_aic_lag(diffed: pd.DataFrame) -> int:
-    model = VAR(diffed)
+    endog, exog = _split_endog_exog(diffed)
+    model = VAR(endog, exog=exog)
     order_results = model.select_order(maxlags=MAX_LAG_SEARCH)
     print(order_results.summary())
     aic_lag = order_results.aic
@@ -148,8 +189,9 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     Both are then scored against the same actual level, so RMSE/MAE are directly
     comparable and expressed in the target's native units (spread, in percentage points).
     """
+    endog_all, exog_all = _split_endog_exog(diffed)
     target_diff_col = f"d_{TARGET}"
-    diff_target_idx = diffed.columns.get_loc(target_diff_col)
+    diff_target_idx = endog_all.columns.get_loc(target_diff_col)
 
     max_h = max(HORIZONS)
     records = {h: {"actual": [], "var_pred": [], "naive_pred": [], "origin_date": []} for h in HORIZONS}
@@ -165,13 +207,23 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     # diffs.
     n = len(levels)
     for origin in range(MIN_TRAIN, n - max_h, STEP):
-        train = diffed.iloc[:origin - 1]
+        train_endog = endog_all.iloc[:origin - 1]
+        train_exog = exog_all.iloc[:origin - 1] if exog_all is not None else None
         try:
-            fitted = VAR(train).fit(lag)
+            fitted = VAR(train_endog, exog=train_exog).fit(lag)
         except (ValueError, np.linalg.LinAlgError):
             continue
 
-        fc = fitted.forecast(train.values[-lag:], steps=max_h)
+        if train_exog is not None:
+            # Issue #72: a future CPI release's surprise isn't knowable at forecast
+            # time (that's what makes it a surprise) -- exog_future is set to the
+            # expanding-window mean of train_exog (an unbiased, lookahead-free best
+            # guess of a mean-zero shock), not its last observed value or an assumed
+            # trend continuation.
+            exog_future = np.tile(train_exog.mean().to_numpy(), (max_h, 1))
+            fc = fitted.forecast(train_endog.values[-lag:], steps=max_h, exog_future=exog_future)
+        else:
+            fc = fitted.forecast(train_endog.values[-lag:], steps=max_h)
         fc_target_diffs = fc[:, diff_target_idx]
         cum_fc = np.cumsum(fc_target_diffs)  # cumulative reconstructed level change
 
@@ -302,6 +354,8 @@ def main():
     levels = load_levels()
     print(f"  {levels.shape}, {levels.index.min().date()} -> {levels.index.max().date()}")
     print(f"  Variables: {FEATURE_SET}")
+    print(f"  Exogenous (issue #72): {EXOG_COLS}; endogenous: "
+          f"{[c for c in FEATURE_SET if f'd_{c}' not in EXOG_COLS]}")
 
     print("\n[2/5] Differencing and confirming stationarity...")
     diffed = to_differenced(levels)

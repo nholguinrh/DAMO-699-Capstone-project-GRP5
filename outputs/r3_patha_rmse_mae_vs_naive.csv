@@ -1,4 +1,4 @@
 horizon_days,n_forecasts,rmse_var,mae_var,rmse_naive,mae_naive,var_beats_naive_rmse,var_beats_naive_mae
-1,750,0.0298,0.0215,0.029,0.0206,False,False
-5,750,0.0636,0.0481,0.0612,0.0463,False,False
-20,750,0.1257,0.0958,0.1251,0.0944,False,False
+1,750,0.0298,0.0216,0.029,0.0206,False,False
+5,750,0.0636,0.0482,0.0612,0.0463,False,False
+20,750,0.1258,0.0957,0.1251,0.0944,False,False
