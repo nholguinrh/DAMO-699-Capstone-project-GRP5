@@ -45,7 +45,7 @@ def test_vif_explodes_for_exact_linear_dependence():
     df["yield_spread_10y_2y"] = df["yield_10y"] - df["yield_2y"]  # === df["b"], exactly
 
     out = compute_vif(df, ["yield_2y", "yield_10y", "yield_spread_10y_2y"])
-    assert (out["vif"] > 1e6).all()
+    assert (out["vif"] == np.inf).all()
 
 
 def test_vif_drops_rows_with_missing_values():
