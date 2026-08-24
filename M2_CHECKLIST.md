@@ -186,6 +186,23 @@ computation path (Section 2/6-8), 5-variable domestic-only is now the robustness
 vector and estimate cleanly — this is a relabeling/reordering, not a substantive result change;
 `outputs/*.csv` are byte-identical before and after.
 
+**Aug 22 — VIF check added (`#67`).** `compute_vif()` (`src/diagnostics.py`, 4 new tests) computed
+for every feature set actually fit by a model, reported in `notebooks/01_eda/eda.ipynb` §8. Two
+different results: the **differenced** 6-variable set VAR-AIC/VAR-BIC/LSTM fit on is clean (VIF
+1.00–1.24 across the board). The **level** sets VECM (`#47`) fits on are not — `fed_funds_rate`
+(VIF 16.5 / 30.7 in the 5-/6-variable systems) and `overnight_rate` (11.1 / 23.4) both clear the
+conventional VIF>10 concern threshold, `us_treasury_10y` and `yield_spread_10y_2y` sit right at it
+(8.5–10.2). Read as expected structure, not a defect: these are non-stationary I(1) levels sharing
+common trends — the same property Johansen/VECM exists to exploit via cointegration, not
+independent regressors an OLS-style VIF rule of thumb assumes. Separately, `#67`'s specifically
+named concern — exact linear redundancy from combining yield levels with more than one spread
+column (`yield_spread_10y_2y === yield_10y - yield_2y === yield_spread_10y_5y + yield_spread_5y_2y`)
+— is confirmed **not** present in any current feature set (every VIF above stays finite); a guard
+demonstration in the same notebook section confirms VIF does go to infinity if a future
+feature-set change ever combines those columns, so there's now a check to re-run if that happens.
+Not treated as blocking or requiring a #47 refit — flagging the level-VIF finding for whoever
+writes up VECM's coefficient stability in the report.
+
 **Aug 22/23 — calendar reconciliation (`#63`), decision + two fixes.** ARIMA/VAR-AIC/VAR-BIC used
 to independently rebuild an inner-joined, no-fill daily frame (4,010 rows, 698 origins) instead of
 reading VECM/LSTM's canonical Gold-layer pipeline (`build_gold_features()`, 4,268 rows, outer join +
