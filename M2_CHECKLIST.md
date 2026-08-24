@@ -269,6 +269,38 @@ dynamics term (`Γ_i Δy_{t-i}`) would need its own validation that moving `cpi_
 doesn't disturb the Johansen rank test's cointegrating relationship. Left as follow-up scope
 rather than bundled silently into this fix — see `#72`.
 
+**Aug 24 — cumulative-sum vs. direct h-step estimation (`#68`), decision + empirical check.**
+`EDA_VAR_AIC _lag _order.py`'s `evaluate()` (#28) forecasts h steps ahead by iterating the
+one-step VAR forward and summing the resulting daily differenced forecasts (`np.cumsum`) back onto
+the last observed level. #68 flagged that this compounds h one-step estimation errors into every
+multi-step forecast — variance the zero-parameter Naive benchmark never carries — and asked whether
+a direct h-step estimator (Marcellino/Stock/Watson-style direct forecasting) changes the h=5/h=20
+"Naive wins" conclusion, since that's exactly where compounding would bite hardest.
+
+Built `src/var_direct_horizon.py`: for each horizon, a single OLS regression of the h-step-ahead
+level change directly on the same lag-block of endogenous differenced predictors the iterated VAR
+conditions on, refit at every expanding-window origin, using the **same feature set and the same
+AIC-selected lag (10) as #28** — so iterated-vs-direct is the only thing that differs.
+`d_cpi_yoy` (#72) excluded from the direct design (folding an exogenous surprise regressor into a
+direct h-step model needs its own h-step-ahead exog assumption, a separate design question from
+the one this check isolates).
+
+**Result: no significant difference between the direct-h and iterated-cumsum estimators at any
+horizon (h=1/5/20), including h=20** — the horizon most exposed to compounding, and the one this
+issue specifically flagged. Both estimators independently still lose to naive at h=1/h=5 (RMSE and
+MAE agree), and neither beats naive at h=20 either way. Switching to direct estimation would not
+rescue VAR-AIC at any horizon and doesn't change any existing Round 3 verdict.
+
+**Decision: keep cumulative-sum/iterated scoring** for #28 (and, by the same reasoning, #29/#47's
+shared `evaluate_vecm()` pattern) — the compounding-variance concern #68 raised is real in
+principle but doesn't measurably bite on this dataset/feature set, and direct estimation adds real
+cost (a 51-regressor OLS per origin/horizon here -- 5 endogenous series x lag 10 + intercept --
+thinner effective sample early in the expanding window) without a demonstrated accuracy benefit. Caveat now documented in the report rather than
+left as an unexamined assumption. Not re-run for ARIMA-AIC/BIC or VAR-BIC (notebooks, same
+follow-up-scope reasoning as #72's VAR-BIC/VECM carve-out) or VECM's `evaluate_vecm()` — the
+direct-vs-iterated question is the same there, but confirming it holds for those arms too is left
+as follow-up.
+
 ## Definition of done
 
 - [x] Round 1 shipped two independent, working collection paths (Giti's sequential pull, Lerneir's
