@@ -1,0 +1,4 @@
+horizon_days,n_forecasts,dm_stat_squared_loss,dm_p_value_squared_loss,dm_stat_absolute_loss,dm_p_value_absolute_loss,a_significantly_better_rmse,b_significantly_better_rmse,a_significantly_better_mae,b_significantly_better_mae,insufficient_sample,verdict
+1,750,1.87,0.0619,1.217,0.224,False,False,False,False,False,no significant difference on either RMSE or MAE
+5,750,0.204,0.8381,0.437,0.6622,False,False,False,False,False,no significant difference on either RMSE or MAE
+20,750,0.131,0.8961,0.615,0.539,False,False,False,False,False,no significant difference on either RMSE or MAE
