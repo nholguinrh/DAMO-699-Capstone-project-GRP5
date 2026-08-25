@@ -14,11 +14,15 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.model_comparison import (
+    apply_clark_west_fdr,
     apply_multiplicity_correction,
     attach_target_date,
+    clark_west_test,
     merge_cross_pipeline,
     pairwise_dm,
     plain_language_verdict,
+    plain_language_verdict_cw,
+    run_clark_west_battery,
 )
 
 
@@ -320,3 +324,184 @@ def test_apply_multiplicity_correction_does_not_mutate_input():
     original_cols = set(dm_all.columns)
     apply_multiplicity_correction(dm_all)
     assert set(dm_all.columns) == original_cols
+
+
+# ---------------------------------------------------------------------------
+# Clark-West (2007) Adjusted MSPE Tests (Issue #88)
+# ---------------------------------------------------------------------------
+
+def test_clark_west_nested_null_hypothesis_no_spurious_rejection():
+    """
+    Under H0 where Model 2 adds zero-mean noise to Model 1 (e.g. parameter
+    estimation noise), Model 2's sample MSPE will be higher than Model 1's MSPE.
+    Standard DM on squared errors would produce DM > 0 (falsely favoring Naive),
+    while Clark-West correctly adjusts for the noise: CW stat is close to 0,
+    p-value >= 0.05, and model_significantly_better is False.
+    """
+    rng = np.random.default_rng(42)
+    n = 1000
+    actual = rng.normal(scale=1.0, size=n)
+    naive = actual + rng.normal(scale=0.5, size=n)
+    # Model 2 estimates noise on top of Naive (nested null DGP)
+    pred_noisy = naive + rng.normal(scale=0.1, size=n)
+
+    res = clark_west_test(actual, naive, pred_noisy, h=1)
+    assert not res["insufficient_sample"]
+    assert res["mspe_model"] > res["mspe_naive"]  # sample MSPE of noisy model is strictly higher
+    assert res["cw_adjustment"] > 0
+    assert abs(res["cw_stat"]) < 1.645  # Not significant at alpha=0.05
+    assert res["cw_p_value"] > 0.05
+    assert not res["model_significantly_better"]
+
+
+def test_clark_west_superior_alternative_is_detected():
+    """
+    When Model 2 has genuine forecasting skill (smaller error variance than Naive),
+    Clark-West should yield a strong positive test statistic (CW > 1.645) and
+    p < 0.05.
+    """
+    rng = np.random.default_rng(101)
+    n = 500
+    actual = rng.normal(scale=1.0, size=n)
+    naive = actual + rng.normal(scale=1.0, size=n)  # noisy benchmark
+    pred_smart = actual + rng.normal(scale=0.2, size=n)  # superior model
+
+    res = clark_west_test(actual, naive, pred_smart, h=1)
+    assert not res["insufficient_sample"]
+    assert res["cw_stat"] > 5.0
+    assert res["cw_p_value"] < 0.001
+    assert res["model_significantly_better"]
+
+
+def test_clark_west_hac_bartlett_weighting_multi_horizon():
+    """
+    Tests that multi-step horizons (h=5, h=20) correctly invoke Bartlett HAC
+    weighting without raising exceptions or producing negative variances.
+    """
+    rng = np.random.default_rng(202)
+    n = 600
+    actual = np.cumsum(rng.normal(scale=0.1, size=n))
+    naive = np.roll(actual, 1)
+    naive[0] = actual[0]
+    pred = actual + rng.normal(scale=0.15, size=n)
+
+    for h in [1, 5, 20]:
+        res = clark_west_test(actual, naive, pred, h=h)
+        assert not res["insufficient_sample"]
+        assert res["se_f_stat"] > 0
+        assert np.isfinite(res["cw_stat"])
+        assert 0.0 <= res["cw_p_value"] <= 1.0
+
+
+def test_clark_west_insufficient_sample_returns_safe_dict():
+    actual = np.array([1.0, 2.0])
+    naive = np.array([1.1, 2.1])
+    pred = np.array([1.2, 2.2])
+
+    res = clark_west_test(actual, naive, pred, h=5)
+    assert res["insufficient_sample"]
+    assert res["cw_stat"] is None
+    assert res["cw_p_value"] is None
+    assert not res["model_significantly_better"]
+
+    v = plain_language_verdict_cw(res, "test_model")
+    assert "insufficient sample" in v
+
+
+def test_plain_language_verdict_cw_scenarios():
+    # Significant improvement
+    row_sig = {
+        "insufficient_sample": False,
+        "n_forecasts": 750,
+        "model_significantly_better": True,
+        "cw_stat": 2.15,
+        "cw_p_value": 0.0158,
+        "mspe_naive": 0.015,
+        "mspe_model": 0.014,
+        "mspe_model_adj": 0.013,
+    }
+    v_sig = plain_language_verdict_cw(row_sig, "VECM")
+    assert "significantly outperforms Naïve" in v_sig
+
+    # Not significant, positive CW
+    row_pos = {
+        "insufficient_sample": False,
+        "n_forecasts": 750,
+        "model_significantly_better": False,
+        "cw_stat": 0.85,
+        "cw_p_value": 0.1977,
+        "mspe_naive": 0.015,
+        "mspe_model": 0.016,
+        "mspe_model_adj": 0.0145,
+    }
+    v_pos = plain_language_verdict_cw(row_pos, "VAR-AIC")
+    assert "fails to reject equal accuracy" in v_pos
+
+    # Negative CW
+    row_neg = {
+        "insufficient_sample": False,
+        "n_forecasts": 750,
+        "model_significantly_better": False,
+        "cw_stat": -1.2,
+        "cw_p_value": 0.8849,
+        "mspe_naive": 0.015,
+        "mspe_model": 0.018,
+        "mspe_model_adj": 0.016,
+    }
+    v_neg = plain_language_verdict_cw(row_neg, "ARIMA-AIC")
+    assert "does not beat Naïve" in v_neg
+
+
+def test_apply_clark_west_fdr_global_and_horizon():
+    """
+    Tests both global and horizon-stratified Benjamini-Hochberg FDR adjustments.
+    """
+    rows = [
+        {"model": "M1", "horizon": 1, "cw_stat": 2.5, "cw_p_value": 0.0062, "insufficient_sample": False, "n_forecasts": 500, "mspe_naive": 0.01, "mspe_model": 0.009, "mspe_model_adj": 0.008},
+        {"model": "M2", "horizon": 1, "cw_stat": 0.5, "cw_p_value": 0.3085, "insufficient_sample": False, "n_forecasts": 500, "mspe_naive": 0.01, "mspe_model": 0.011, "mspe_model_adj": 0.010},
+        {"model": "M1", "horizon": 5, "cw_stat": 1.8, "cw_p_value": 0.0359, "insufficient_sample": False, "n_forecasts": 500, "mspe_naive": 0.02, "mspe_model": 0.019, "mspe_model_adj": 0.018},
+        {"model": "M2", "horizon": 5, "cw_stat": -0.2, "cw_p_value": 0.5793, "insufficient_sample": False, "n_forecasts": 500, "mspe_naive": 0.02, "mspe_model": 0.022, "mspe_model_adj": 0.021},
+    ]
+    df = pd.DataFrame(rows)
+    df["model_significantly_better"] = df["cw_p_value"] < 0.05
+    df["verdict_raw"] = df.apply(lambda r: plain_language_verdict_cw(r.to_dict(), r["model"]), axis=1)
+
+    out = apply_clark_west_fdr(df, alpha=0.05)
+
+    expected_cols = {
+        "cw_p_adj_global", "cw_p_adj_horizon",
+        "model_significantly_better_fdr_global", "model_significantly_better_fdr_horizon",
+        "verdict_fdr_global", "verdict_fdr_horizon",
+    }
+    assert expected_cols.issubset(out.columns)
+    # Adjusted p-values must always be >= raw p-values
+    assert (out["cw_p_adj_global"] >= out["cw_p_value"] - 1e-6).all()
+    assert (out["cw_p_adj_horizon"] >= out["cw_p_value"] - 1e-6).all()
+
+
+def test_run_clark_west_battery_smoke():
+    """
+    Integration smoke test executing the full Clark-West 12-test battery
+    against the actual outputs/ forecast files.
+    """
+    primary_df, sensitivity_df = run_clark_west_battery()
+
+    # 4 models x 3 horizons = 12 rows
+    assert len(primary_df) == 12
+    assert set(primary_df["horizon"]) == {1, 5, 20}
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
+
+    # 2 BIC models x 3 horizons = 6 rows
+    assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
+
+    # All forecasts should have ~745 to 750 sample size
+    assert (primary_df["n_forecasts"] >= 745).all()
+    assert (primary_df["n_forecasts"] <= 750).all()
+
+    # Verify no NaN test statistics
+    assert primary_df["cw_stat"].notna().all()
+    assert primary_df["cw_p_value"].notna().all()
+    assert primary_df["cw_p_adj_global"].notna().all()
+    assert primary_df["cw_p_adj_horizon"].notna().all()
+

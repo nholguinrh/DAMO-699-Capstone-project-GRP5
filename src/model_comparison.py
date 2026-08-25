@@ -55,6 +55,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 from dieboldmariano import (
     InvalidParameterException,
     NegativeVarianceException,
@@ -348,7 +349,7 @@ def apply_multiplicity_correction(dm_all: pd.DataFrame, alpha: float = ALPHA) ->
     here too and get NaN adjusted p-values, non-significant adjusted flags, and
     the same "insufficient sample" verdict text.
 
-    Expects the columns `dm_all` (as assembled by dm_pairwise_comparison.ipynb)
+    Expects the columns `dm_all` (as assembled by clark_west_comparison.ipynb / legacy dm_pairwise_comparison)
     already has: `model_a`, `model_b`, `n_forecasts`, `insufficient_sample`,
     `dm_stat_squared_loss`, `dm_p_value_squared_loss`, `dm_stat_absolute_loss`,
     `dm_p_value_absolute_loss`.
@@ -404,4 +405,325 @@ def apply_multiplicity_correction(dm_all: pd.DataFrame, alpha: float = ALPHA) ->
         return plain_language_verdict(adj_row, row["model_a"], row["model_b"])
 
     out["verdict_bh"] = out.apply(_adjusted_verdict, axis=1)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 5. Clark-West (2007) Adjusted MSPE Test for Nested Models (Issue #88)
+# ---------------------------------------------------------------------------
+
+def clark_west_test(
+    actual: np.ndarray | pd.Series,
+    pred_benchmark: np.ndarray | pd.Series,
+    pred_model: np.ndarray | pd.Series,
+    h: int,
+    alpha: float = ALPHA,
+    small_sample_adj: bool = True,
+) -> dict:
+    """
+    Computes the Clark-West (2007) adjusted MSPE test for comparing a nested
+    benchmark (Model 1: Naïve Random Walk) against an unrestricted larger model
+    (Model 2: ARIMA, VAR, VECM, LSTM) at forecast horizon `h`.
+
+    Econometric rationale (Clark & McCracken 2001, Clark & West 2006, 2007):
+    Under the null hypothesis H0 that the competing model's additional parameters
+    have zero population predictive value, in-sample parameter estimation introduces
+    noise of order O_p(1/T), inflating the larger model's sample MSPE. The standard
+    Diebold-Mariano loss differential d_t = e1_t^2 - e2_t^2 thus has a negative expected
+    value under H0, causing spurious rejections in favor of the benchmark.
+
+    Clark-West corrects this bias by defining the adjusted loss differential:
+        f_hat_t = e1_t^2 - [ e2_t^2 - (y_hat1_t - y_hat2_t)^2 ]
+                = 2 * e1_t * (y_hat2_t - y_hat1_t)
+    where:
+        e1_t = actual_t - y_hat1_t (benchmark error)
+        e2_t = actual_t - y_hat2_t (competing model error)
+        adj_t = (y_hat1_t - y_hat2_t)^2 (parameter estimation noise correction)
+
+    Sample MSPEs:
+        MSPE_1 = (1/N) * sum(e1_t^2)
+        MSPE_2 = (1/N) * sum(e2_t^2)
+        adj    = (1/N) * sum(adj_t)
+        MSPE_2_adj = MSPE_2 - adj
+        f_bar  = MSPE_1 - MSPE_2_adj = (1/N) * sum(f_hat_t)
+
+    Variance Estimation of f_bar:
+        - For h=1 (1-step ahead, no forecast overlap): sample variance s_f^2 / N.
+        - For h>1 (multi-step overlapping horizons): Heteroskedasticity and
+          Autocorrelation Consistent (HAC / Newey-West) variance estimator with
+          Bartlett kernel and truncation lag J = h - 1.
+        - Optional Harvey, Leybourne & Newbold (1997) small-sample modification factor:
+          HLN = (N + 1 - 2*h + h*(h-1)/N) / N.
+
+    Hypothesis Testing:
+        - One-sided test: H0: MSPE_1 <= MSPE_2 vs. H1: MSPE_1 > MSPE_2
+        - CW = f_bar / SE(f_bar)
+        - p_value = 1 - Phi(CW) = stats.norm.sf(CW)
+    """
+    y = np.asarray(actual, dtype=float)
+    y1 = np.asarray(pred_benchmark, dtype=float)
+    y2 = np.asarray(pred_model, dtype=float)
+
+    # Filter out NaNs if any exist
+    valid = np.isfinite(y) & np.isfinite(y1) & np.isfinite(y2)
+    y, y1, y2 = y[valid], y1[valid], y2[valid]
+    n = len(y)
+
+    if n <= h or n < 3:
+        return {
+            "n_forecasts": n,
+            "mspe_naive": None,
+            "mspe_model": None,
+            "cw_adjustment": None,
+            "mspe_model_adj": None,
+            "mean_f_stat": None,
+            "se_f_stat": None,
+            "cw_stat": None,
+            "cw_p_value": None,
+            "model_significantly_better": False,
+            "insufficient_sample": True,
+        }
+
+    e1 = y - y1
+    e2 = y - y2
+    mspe_1 = float(np.mean(e1**2))
+    mspe_2 = float(np.mean(e2**2))
+    adj = float(np.mean((y1 - y2)**2))
+    mspe_2_adj = float(mspe_2 - adj)
+
+    f_t = e1**2 - (e2**2 - (y1 - y2)**2)
+    f_bar = float(np.mean(f_t))
+    z = f_t - f_bar
+    gamma0 = float(np.mean(z**2))
+
+    if h <= 1:
+        omega = gamma0
+    else:
+        omega = gamma0
+        for k in range(1, h):
+            weight = 1.0 - (k / h)
+            gamma_k = float(np.sum(z[k:] * z[:-k]) / n)
+            omega += 2.0 * weight * gamma_k
+
+    omega = max(omega, 1e-14)
+    var_f = omega / n
+
+    if small_sample_adj:
+        hln = (n + 1 - 2 * h + (h * (h - 1)) / n) / n
+        if hln > 0:
+            var_f = var_f / hln
+
+    se_f = float(np.sqrt(var_f))
+    cw_stat = float(f_bar / se_f) if se_f > 0 else 0.0
+    cw_p_value = float(stats.norm.sf(cw_stat))
+
+    model_better = bool(cw_p_value < alpha and cw_stat > 0)
+
+    return {
+        "n_forecasts": n,
+        "mspe_naive": round(mspe_1, 6),
+        "mspe_model": round(mspe_2, 6),
+        "cw_adjustment": round(adj, 6),
+        "mspe_model_adj": round(mspe_2_adj, 6),
+        "mean_f_stat": round(f_bar, 6),
+        "se_f_stat": round(se_f, 6),
+        "cw_stat": round(cw_stat, 3),
+        "cw_p_value": round(cw_p_value, 4),
+        "model_significantly_better": model_better,
+        "insufficient_sample": False,
+    }
+
+
+def plain_language_verdict_cw(row: dict | pd.Series, model_name: str) -> str:
+    """
+    Generates plain-language econometric interpretation for a Clark-West test result.
+    """
+    if row.get("insufficient_sample"):
+        return f"insufficient sample (n={row.get('n_forecasts', 0)}) to run Clark-West test"
+
+    sig = bool(row.get("model_significantly_better", False))
+    cw_stat = row.get("cw_stat")
+    p_val = row.get("cw_p_value")
+    mspe_m = row.get("mspe_model")
+    mspe_adj = row.get("mspe_model_adj")
+    mspe_n = row.get("mspe_naive")
+
+    if cw_stat is None or p_val is None:
+        return "insufficient data to compute verdict"
+
+    if sig:
+        return (
+            f"{model_name} significantly outperforms Naïve benchmark after Clark-West MSPE adjustment "
+            f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_adj={mspe_adj:.5f})"
+        )
+    else:
+        if cw_stat <= 0:
+            return (
+                f"No significant improvement: {model_name} does not beat Naïve under Clark-West "
+                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_model={mspe_m:.5f})"
+            )
+        else:
+            return (
+                f"Positive point gain not statistically significant: {model_name} fails to reject equal accuracy "
+                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_adj={mspe_adj:.5f})"
+            )
+
+
+def run_clark_west_battery(
+    alpha: float = ALPHA,
+    date_min: pd.Timestamp | str | None = None,
+    date_max: pd.Timestamp | str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Executes the full Clark-West test battery against the Naïve benchmark (Issue #88).
+
+    Primary 12-test battery:
+        4 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM) x 3 horizons (1, 5, 20)
+    Sensitivity battery:
+        2 BIC variants (ARIMA-BIC, VAR-BIC) x 3 horizons (1, 5, 20)
+
+    Returns:
+        (primary_12_df, sensitivity_df)
+    """
+    core = load_core()
+    d_min = date_min if date_min is not None else core["origin_date"].min()
+    d_max = date_max if date_max is not None else core["origin_date"].max()
+
+    vecm = load_vecm(d_min, d_max)
+    lstm = load_lstm(d_min, d_max)
+
+    m_lstm = merge_cross_pipeline(
+        core, "arima_aic", core_calendar(),
+        lstm, "lstm", lstm_calendar(),
+    )
+
+    primary_models = [
+        ("arima_aic", "ARIMA-AIC", "core"),
+        ("var_aic", "VAR-AIC", "core"),
+        ("vecm", "VECM (6-var)", "vecm"),
+        ("lstm", "LSTM (Tuned)", "lstm"),
+    ]
+
+    sensitivity_models = [
+        ("arima_bic", "ARIMA-BIC", "core"),
+        ("var_bic", "VAR-BIC", "core"),
+    ]
+
+    def _evaluate_models(model_list: list[tuple[str, str, str]]) -> pd.DataFrame:
+        records = []
+        for col_name, display_name, source in model_list:
+            for h in HORIZONS:
+                if source == "core":
+                    df_sub = core[core["horizon"] == h]
+                    act = df_sub["actual"].to_numpy()
+                    naive = df_sub["naive"].to_numpy()
+                    pred = df_sub[col_name].to_numpy()
+                elif source == "vecm":
+                    df_sub = vecm[vecm["horizon"] == h]
+                    act = df_sub["actual"].to_numpy()
+                    naive = df_sub["naive"].to_numpy()
+                    pred = df_sub[col_name].to_numpy()
+                elif source == "lstm":
+                    df_sub = m_lstm[m_lstm["horizon"] == h]
+                    act = df_sub["actual"].to_numpy()
+                    naive = df_sub["naive"].to_numpy()
+                    pred = df_sub[col_name].to_numpy()
+                else:
+                    raise ValueError(f"Unknown source {source}")
+
+                res = clark_west_test(act, naive, pred, h=h, alpha=alpha)
+                rec = {
+                    "model": display_name,
+                    "model_key": col_name,
+                    "horizon": h,
+                    **res,
+                }
+                rec["verdict_raw"] = plain_language_verdict_cw(res, display_name)
+                records.append(rec)
+        return pd.DataFrame(records)
+
+    primary_df = _evaluate_models(primary_models)
+    sensitivity_df = _evaluate_models(sensitivity_models)
+
+    # Apply FDR correction
+    primary_df = apply_clark_west_fdr(primary_df, alpha=alpha)
+    sensitivity_df = apply_clark_west_fdr(sensitivity_df, alpha=alpha)
+
+    return primary_df, sensitivity_df
+
+
+def apply_clark_west_fdr(cw_df: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
+    """
+    Applies Benjamini-Hochberg (BH) FDR multiplicity correction to Clark-West test results.
+
+    Implements two complementary correction tiers:
+    1. Global FDR across all tests in the table (`cw_p_adj_global`, `model_significantly_better_fdr_global`)
+    2. Horizon-Stratified FDR within each horizon subset (`cw_p_adj_horizon`, `model_significantly_better_fdr_horizon`),
+       preventing long-horizon noise from masking short-horizon discoveries (Issue #81).
+    """
+    out = cw_df.copy()
+    p_col = "cw_p_value"
+
+    out["cw_p_adj_global"] = np.nan
+    out["cw_p_adj_horizon"] = np.nan
+
+    # 1. Global FDR
+    testable = out[p_col].notna() & (~out["insufficient_sample"])
+    if testable.any():
+        _, p_adj_glob, _, _ = multipletests(
+            out.loc[testable, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
+        )
+        out.loc[testable, "cw_p_adj_global"] = np.round(p_adj_glob, 4)
+
+    # 2. Horizon-Stratified FDR
+    for h in out["horizon"].unique():
+        h_mask = testable & (out["horizon"] == h)
+        if h_mask.any():
+            _, p_adj_h, _, _ = multipletests(
+                out.loc[h_mask, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
+            )
+            out.loc[h_mask, "cw_p_adj_horizon"] = np.round(p_adj_h, 4)
+
+    # Significance flags (requires p_adj < alpha AND cw_stat > 0)
+    out["model_significantly_better_fdr_global"] = (
+        out["cw_p_adj_global"].notna()
+        & (out["cw_p_adj_global"] < alpha)
+        & (out["cw_stat"] > 0)
+    )
+    out["model_significantly_better_fdr_horizon"] = (
+        out["cw_p_adj_horizon"].notna()
+        & (out["cw_p_adj_horizon"] < alpha)
+        & (out["cw_stat"] > 0)
+    )
+
+    # Verdicts under FDR
+    def _verdict_glob(row: pd.Series) -> str:
+        r_dict = {
+            "insufficient_sample": row["insufficient_sample"],
+            "n_forecasts": row["n_forecasts"],
+            "model_significantly_better": row["model_significantly_better_fdr_global"],
+            "cw_stat": row["cw_stat"],
+            "cw_p_value": row["cw_p_adj_global"],
+            "mspe_naive": row["mspe_naive"],
+            "mspe_model": row["mspe_model"],
+            "mspe_model_adj": row["mspe_model_adj"],
+        }
+        return plain_language_verdict_cw(r_dict, row["model"])
+
+    def _verdict_horiz(row: pd.Series) -> str:
+        r_dict = {
+            "insufficient_sample": row["insufficient_sample"],
+            "n_forecasts": row["n_forecasts"],
+            "model_significantly_better": row["model_significantly_better_fdr_horizon"],
+            "cw_stat": row["cw_stat"],
+            "cw_p_value": row["cw_p_adj_horizon"],
+            "mspe_naive": row["mspe_naive"],
+            "mspe_model": row["mspe_model"],
+            "mspe_model_adj": row["mspe_model_adj"],
+        }
+        return plain_language_verdict_cw(r_dict, row["model"])
+
+    out["verdict_fdr_global"] = out.apply(_verdict_glob, axis=1)
+    out["verdict_fdr_horizon"] = out.apply(_verdict_horiz, axis=1)
+
     return out
