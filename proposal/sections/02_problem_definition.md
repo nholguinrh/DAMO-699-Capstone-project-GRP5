@@ -1,11 +1,9 @@
 ## 2. Problem Definition
 
-Accurate interpretation of monetary policy, sovereign bond yields, and exchange-rate movements is essential for managing interest-rate risk and understanding changes in the Canadian fixed-income market. However, these indicators are released on different schedules and at different frequencies, which makes them difficult to align and analyze consistently. As a result, yield-curve analysis is often fragmented, time-consuming, and difficult to reproduce.
+Reliable forecasting of near-term changes in the Canadian yield curve is relevant for fixed-income analysis, interest-rate risk management, and portfolio decision-making. However, the macro-financial variables associated with the yield curve are released at different frequencies and on different schedules, which creates challenges for temporal alignment, reproducibility, and consistent model evaluation.
 
-The problem is relevant because the Government of Canada yield curve is a benchmark for asset pricing, portfolio allocation, and monetary policy assessment. Open data is especially valuable in this context because it allows the full workflow to be verified, reproduced, and reviewed without the barriers associated with proprietary financial datasets.
+The problem is particularly relevant because the Government of Canada yield curve is a benchmark for asset pricing, portfolio allocation, and monetary-policy assessment. Open public data is valuable in this context because it allows the analytical workflow to be verified, reproduced, and reviewed without relying on proprietary financial datasets.
 
-The primary beneficiaries of a solution to this problem are fixed-income analysts, portfolio managers, risk managers, and monetary-policy watchers who depend on yield-curve information to price instruments, manage duration exposure, assess interest-rate risk, and interpret the Bank of Canada’s policy stance.
+The primary beneficiaries of a solution to this problem are fixed-income analysts, portfolio managers, risk managers, and monetary-policy watchers who use yield-curve information to assess interest-rate conditions, manage duration exposure, and support investment and risk-management decisions.
 
-This project addresses that challenge by developing a reproducible data analytics framework that automates the collection, preparation, and analysis of publicly available macro-financial data from the Bank of Canada. The goal is to explain and forecast changes in the Canadian yield curve using a transparent and repeatable analytical process.
-
-
+This project addresses the challenge by developing a reproducible forecasting framework that automates the collection, preparation, temporal alignment, and evaluation of publicly available macro-financial data. The analysis compares a Naïve Random Walk benchmark, ARIMA, VAR/VECM, and LSTM across common 1-day, 5-day, and 20-day horizons to determine which modelling approach most reliably forecasts near-term changes in the Canadian 10-year minus 2-year yield spread for use in an operational decision.
