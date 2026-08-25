@@ -52,12 +52,12 @@ HORIZONS = [1, 5, 20]
 LOOKBACK = 20          # trading days of history fed to the LSTM at each origin
 MIN_TRAIN = 500        # first fold's training size, matching the VAR/ARIMA MIN_TRAIN convention
 N_FOLDS = 5            # rolling-window CV folds (expanding window, sequential test blocks)
-HIDDEN_SIZE = 16
-DROPOUT = 0.2
+HIDDEN_SIZE = 32       # tuned via grid search (#90, previously 16)
+DROPOUT = 0.1          # tuned via grid search (#90, previously 0.2)
 MAX_EPOCHS = 100
 PATIENCE = 8           # early-stopping patience on validation loss
 BATCH_SIZE = 64
-LR = 1e-3
+LR = 5e-4              # tuned via grid search (#90, previously 1e-3)
 SEED = 42
 
 
@@ -331,7 +331,7 @@ def train_final_model(
 
 def save_final_model(model: nn.Module, scaling: dict, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    hidden_size = model.head.in_features if hasattr(model, "head") else HIDDEN_SIZE
+    hidden_size = model.lstm.hidden_size if hasattr(model, "lstm") else getattr(model, "hidden_size", HIDDEN_SIZE)
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -343,7 +343,7 @@ def save_final_model(model: nn.Module, scaling: dict, path: Path):
             # future FEATURES change can't silently load stale weights under a
             # mismatched feature list -- see load_final_model()'s check below.
             "features": list(FEATURES),
-            "hidden_size": hidden_size,
+            "hidden_size": int(hidden_size),
         },
         path,
     )
@@ -372,6 +372,8 @@ def load_final_model(
     if hidden_size is None:
         if "hidden_size" in checkpoint:
             hidden_size = int(checkpoint["hidden_size"])
+        elif "state_dict" in checkpoint and "lstm.weight_ih_l0" in checkpoint["state_dict"]:
+            hidden_size = checkpoint["state_dict"]["lstm.weight_ih_l0"].shape[0] // 4
         elif "state_dict" in checkpoint and "head.weight" in checkpoint["state_dict"]:
             hidden_size = checkpoint["state_dict"]["head.weight"].shape[1]
         else:

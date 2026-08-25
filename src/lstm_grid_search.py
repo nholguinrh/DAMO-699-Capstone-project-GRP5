@@ -28,16 +28,20 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from dieboldmariano import dm_test
+from dieboldmariano import (
+    InvalidParameterException,
+    NegativeVarianceException,
+    dm_test,
+)
 
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent
-if str(current_dir) not in sys.path:
-    sys.path.insert(0, str(current_dir))
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
 
-from lstm_baseline import (
+from src.lstm_baseline import (
     DROPOUT,
     FEATURES,
     HIDDEN_SIZE,
@@ -58,7 +62,7 @@ from lstm_baseline import (
     save_final_model,
     train_final_model,
 )
-from project_paths import PROJECT_ROOT
+from src.project_paths import PROJECT_ROOT
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -69,12 +73,42 @@ GRID_SEARCH_SPACE: Dict[str, List[Any]] = {
     "learning_rate": [1e-3, 5e-4],
 }
 
+# The canonical baseline configuration prior to tuning (Issue #49)
 CANONICAL_CONFIG: Dict[str, Any] = {
     "hidden_size": 16,
     "dropout": 0.2,
     "lookback": 20,
     "learning_rate": 1e-3,
 }
+
+
+def _safe_dm_test(
+    actual: np.ndarray,
+    pred_a: np.ndarray,
+    pred_b: np.ndarray,
+    h: int,
+    loss: Optional[Any] = None,
+) -> Tuple[float, float]:
+    """
+    Guarded Diebold-Mariano test wrapper preventing unhandled exceptions
+    on degenerate variance or undersized slices (matching model_comparison.py).
+    """
+    n = len(actual)
+    if n <= h:
+        return np.nan, np.nan
+    try:
+        kwargs: Dict[str, Any] = {
+            "h": h,
+            "one_sided": False,
+            "harvey_correction": True,
+            "variance_estimator": "bartlett",
+        }
+        if loss is not None:
+            kwargs["loss"] = loss
+        stat, p_val = dm_test(actual, pred_a, pred_b, **kwargs)
+        return float(stat), float(p_val)
+    except (InvalidParameterException, NegativeVarianceException, Exception):
+        return np.nan, np.nan
 
 
 def evaluate_cv_config(
@@ -364,20 +398,17 @@ def update_downstream_outputs(
         naive = subset["naive"].to_numpy()
         lstm = subset["lstm"].to_numpy()
 
-        dm_stat_sq, p_sq = dm_test(
-            actual, lstm, naive,
-            h=h, one_sided=False, harvey_correction=True, variance_estimator="bartlett",
+        dm_stat_sq, p_sq = _safe_dm_test(
+            actual, lstm, naive, h=h,
         )
-        dm_stat_abs, p_abs = dm_test(
-            actual, lstm, naive,
-            loss=lambda u, v: abs(u - v),
-            h=h, one_sided=False, harvey_correction=True, variance_estimator="bartlett",
+        dm_stat_abs, p_abs = _safe_dm_test(
+            actual, lstm, naive, h=h, loss=lambda u, v: abs(u - v),
         )
 
-        lstm_better_rmse = bool(p_sq < ALPHA and dm_stat_sq < 0)
-        naive_better_rmse = bool(p_sq < ALPHA and dm_stat_sq > 0)
-        lstm_better_mae = bool(p_abs < ALPHA and dm_stat_abs < 0)
-        naive_better_mae = bool(p_abs < ALPHA and dm_stat_abs > 0)
+        lstm_better_rmse = bool(not np.isnan(p_sq) and p_sq < ALPHA and dm_stat_sq < 0)
+        naive_better_rmse = bool(not np.isnan(p_sq) and p_sq < ALPHA and dm_stat_sq > 0)
+        lstm_better_mae = bool(not np.isnan(p_abs) and p_abs < ALPHA and dm_stat_abs < 0)
+        naive_better_mae = bool(not np.isnan(p_abs) and p_abs < ALPHA and dm_stat_abs > 0)
 
         dm_results.append({
             "model": "lstm",
@@ -424,16 +455,17 @@ def main() -> None:
     print(f"  dropout       : {best['dropout']}")
     print(f"  lookback      : {best['lookback']}")
     print(f"  learning_rate : {best['learning_rate']}")
-    print(f"  Mean Val MSE  : {best['mean_val_mse']:.6f} (±{best['std_val_mse']:.6f})")
+    print(f"  Mean Val MSE  : {best['mean_val_mse']:.6f} (±{best['std_val_mse']:.6f}) [CV early-stopping holdout]")
 
     print(f"\nCanonical Baseline Config (Rank #{canon['rank']}):")
     print(f"  hidden_size   : {canon['hidden_size']}")
     print(f"  dropout       : {canon['dropout']}")
     print(f"  lookback      : {canon['lookback']}")
     print(f"  learning_rate : {canon['learning_rate']}")
-    print(f"  Mean Val MSE  : {canon['mean_val_mse']:.6f} (±{canon['std_val_mse']:.6f})")
+    print(f"  Mean Val MSE  : {canon['mean_val_mse']:.6f} (±{canon['std_val_mse']:.6f}) [CV early-stopping holdout]")
 
-    print(f"\nRelative MSE Improvement over Canonical: {summary['improvement_pct']:+.2f}%")
+    print(f"\nRelative Validation MSE Improvement over Canonical: {summary['improvement_pct']:+.2f}%")
+    print("NOTE: Metric is based on the 15% inner validation slice of training folds for early stopping.")
 
     if summary["is_new_best"]:
         print("\n>>> NEW OPTIMAL CONFIGURATION FOUND! Updating downstream model and forecast outputs...")
