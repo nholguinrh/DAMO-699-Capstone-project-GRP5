@@ -23,6 +23,7 @@ should re-converge to 6 variables rather than #49 converging down to 5.
 
 import sys
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -51,12 +52,12 @@ HORIZONS = [1, 5, 20]
 LOOKBACK = 20          # trading days of history fed to the LSTM at each origin
 MIN_TRAIN = 500        # first fold's training size, matching the VAR/ARIMA MIN_TRAIN convention
 N_FOLDS = 5            # rolling-window CV folds (expanding window, sequential test blocks)
-HIDDEN_SIZE = 16
-DROPOUT = 0.2
+HIDDEN_SIZE = 32       # tuned via grid search (#90, previously 16)
+DROPOUT = 0.1          # tuned via grid search (#90, previously 0.2)
 MAX_EPOCHS = 100
 PATIENCE = 8           # early-stopping patience on validation loss
 BATCH_SIZE = 64
-LR = 1e-3
+LR = 5e-4              # tuned via grid search (#90, previously 1e-3)
 SEED = 42
 
 
@@ -225,7 +226,8 @@ def run_rolling_cv(
     df: pd.DataFrame,
     lookback: int = LOOKBACK, horizons=HORIZONS,
     min_train: int = MIN_TRAIN, n_folds: int = N_FOLDS,
-    hidden_size: int = HIDDEN_SIZE, max_epochs: int = MAX_EPOCHS, patience: int = PATIENCE,
+    hidden_size: int = HIDDEN_SIZE, dropout: float = DROPOUT, lr: float = LR,
+    max_epochs: int = MAX_EPOCHS, patience: int = PATIENCE,
     min_val_size: int = 50,
 ):
     """
@@ -261,7 +263,8 @@ def run_rolling_cv(
         model, scaling, best_val, epochs_run = _normalize_and_train(
             Xtr, Ytr, Xval, Yval,
             n_features=len(FEATURES), seed=SEED + fold_id,
-            hidden_size=hidden_size, max_epochs=max_epochs, patience=patience,
+            hidden_size=hidden_size, dropout=dropout, lr=lr,
+            max_epochs=max_epochs, patience=patience,
         )
         x_mean, x_std, y_mean, y_std = (
             scaling["x_mean"], scaling["x_std"], scaling["y_mean"], scaling["y_std"]
@@ -301,7 +304,8 @@ def run_rolling_cv(
 def train_final_model(
     df: pd.DataFrame, val_frac: float = 0.15, seed: int = SEED,
     lookback: int = LOOKBACK, horizons=HORIZONS,
-    hidden_size: int = HIDDEN_SIZE, max_epochs: int = MAX_EPOCHS, patience: int = PATIENCE,
+    hidden_size: int = HIDDEN_SIZE, dropout: float = DROPOUT, lr: float = LR,
+    max_epochs: int = MAX_EPOCHS, patience: int = PATIENCE,
 ):
     """
     Train one shallow LSTM on the full common sample (chronological train/val
@@ -318,7 +322,8 @@ def train_final_model(
     model, scaling, best_val, epochs_run = _normalize_and_train(
         Xtr, Ytr, Xval, Yval,
         n_features=len(FEATURES), seed=seed,
-        hidden_size=hidden_size, max_epochs=max_epochs, patience=patience,
+        hidden_size=hidden_size, dropout=dropout, lr=lr,
+        max_epochs=max_epochs, patience=patience,
     )
 
     return model, scaling, X, origin_idx, {"best_val_loss": best_val, "epochs_run": epochs_run}
@@ -326,6 +331,7 @@ def train_final_model(
 
 def save_final_model(model: nn.Module, scaling: dict, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
+    hidden_size = model.lstm.hidden_size if hasattr(model, "lstm") else getattr(model, "hidden_size", HIDDEN_SIZE)
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -337,6 +343,7 @@ def save_final_model(model: nn.Module, scaling: dict, path: Path):
             # future FEATURES change can't silently load stale weights under a
             # mismatched feature list -- see load_final_model()'s check below.
             "features": list(FEATURES),
+            "hidden_size": int(hidden_size),
         },
         path,
     )
@@ -344,7 +351,7 @@ def save_final_model(model: nn.Module, scaling: dict, path: Path):
 
 def load_final_model(
     path: Path, n_features: int = len(FEATURES),
-    hidden_size: int = HIDDEN_SIZE, n_outputs: int = len(HORIZONS),
+    hidden_size: Optional[int] = None, n_outputs: int = len(HORIZONS),
 ):
     # weights_only=True: this checkpoint is committed to git and shared across the
     # team, so we don't want full pickle deserialization (arbitrary code execution)
@@ -361,6 +368,16 @@ def load_final_model(
             "before loading it here -- loading it anyway would silently mislabel "
             "SHAP attributions against the wrong features."
         )
+
+    if hidden_size is None:
+        if "hidden_size" in checkpoint:
+            hidden_size = int(checkpoint["hidden_size"])
+        elif "state_dict" in checkpoint and "lstm.weight_ih_l0" in checkpoint["state_dict"]:
+            hidden_size = checkpoint["state_dict"]["lstm.weight_ih_l0"].shape[0] // 4
+        elif "state_dict" in checkpoint and "head.weight" in checkpoint["state_dict"]:
+            hidden_size = checkpoint["state_dict"]["head.weight"].shape[1]
+        else:
+            hidden_size = HIDDEN_SIZE
 
     model = ShallowLSTM(n_features=n_features, hidden_size=hidden_size, n_outputs=n_outputs)
     model.load_state_dict(checkpoint["state_dict"])

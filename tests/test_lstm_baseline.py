@@ -211,8 +211,13 @@ def test_train_final_model_save_and_load_roundtrip(tmp_path):
     save_final_model(model, scaling, model_path)
     assert model_path.exists()
 
+    ckpt = torch.load(model_path, weights_only=True)
+    assert "hidden_size" in ckpt
+    assert ckpt["hidden_size"] == 4
+
+    # Load with auto-detected hidden_size
     loaded_model, loaded_scaling = load_final_model(
-        model_path, n_features=len(FEATURES), hidden_size=4, n_outputs=3
+        model_path, n_features=len(FEATURES), n_outputs=3
     )
 
     sample = torch.from_numpy(((X[:4] - scaling["x_mean"]) / scaling["x_std"]).astype(np.float32))
