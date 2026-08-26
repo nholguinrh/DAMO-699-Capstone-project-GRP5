@@ -328,88 +328,7 @@ def plain_language_verdict(row: dict, name_a: str, name_b: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 4. Multiple-testing correction (issue #69)
-# ---------------------------------------------------------------------------
-
-def apply_multiplicity_correction(dm_all: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
-    """
-    Benjamini-Hochberg FDR correction across a full table of pairwise DM tests
-    (issue #69). At alpha=0.05 across the 63 tests #50 runs (21 pairs x 3
-    horizons), the raw family-wise error rate is 1-(1-0.05)**63 ~= 96% -- close
-    to guaranteed at least one "significant" result by chance alone, even if no
-    real pairwise differences exist anywhere. BH control is applied separately
-    per loss function (squared-loss p-values as one family, absolute-loss
-    p-values as another), matching how RMSE- and MAE-based verdicts are already
-    treated as independent tracks everywhere else in this module.
-
-    Adds `*_bh` columns alongside the existing raw ones -- doesn't overwrite or
-    drop the raw p-values/verdicts, since the raw numbers are still legitimate
-    to report next to the adjusted ones (transparency, not replacement). Rows
-    with `insufficient_sample=True` (no p-value to begin with) stay untestable
-    here too and get NaN adjusted p-values, non-significant adjusted flags, and
-    the same "insufficient sample" verdict text.
-
-    Expects the columns `dm_all` (as assembled by clark_west_comparison.ipynb / legacy dm_pairwise_comparison)
-    already has: `model_a`, `model_b`, `n_forecasts`, `insufficient_sample`,
-    `dm_stat_squared_loss`, `dm_p_value_squared_loss`, `dm_stat_absolute_loss`,
-    `dm_p_value_absolute_loss`.
-    """
-    out = dm_all.copy()
-
-    for loss in ("squared_loss", "absolute_loss"):
-        p_col = f"dm_p_value_{loss}"
-        p_adj_col = f"dm_p_adj_{loss}"
-        out[p_adj_col] = np.nan
-
-        testable = out[p_col].notna()
-        if testable.any():
-            _, p_adj, _, _ = multipletests(
-                out.loc[testable, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
-            )
-            out.loc[testable, p_adj_col] = p_adj
-
-    # Re-derive significance flags from the adjusted p-values, keeping the same
-    # dm_stat-sign convention pairwise_dm() uses: stat < 0 -> a better, > 0 -> b better.
-    out["a_significantly_better_rmse_bh"] = (
-        out["dm_p_adj_squared_loss"].notna()
-        & (out["dm_p_adj_squared_loss"] < alpha)
-        & (out["dm_stat_squared_loss"] < 0)
-    )
-    out["b_significantly_better_rmse_bh"] = (
-        out["dm_p_adj_squared_loss"].notna()
-        & (out["dm_p_adj_squared_loss"] < alpha)
-        & (out["dm_stat_squared_loss"] > 0)
-    )
-    out["a_significantly_better_mae_bh"] = (
-        out["dm_p_adj_absolute_loss"].notna()
-        & (out["dm_p_adj_absolute_loss"] < alpha)
-        & (out["dm_stat_absolute_loss"] < 0)
-    )
-    out["b_significantly_better_mae_bh"] = (
-        out["dm_p_adj_absolute_loss"].notna()
-        & (out["dm_p_adj_absolute_loss"] < alpha)
-        & (out["dm_stat_absolute_loss"] > 0)
-    )
-
-    def _adjusted_verdict(row: pd.Series) -> str:
-        adj_row = {
-            "insufficient_sample": row["insufficient_sample"],
-            "n_forecasts": row["n_forecasts"],
-            "a_significantly_better_rmse": row["a_significantly_better_rmse_bh"],
-            "b_significantly_better_rmse": row["b_significantly_better_rmse_bh"],
-            "a_significantly_better_mae": row["a_significantly_better_mae_bh"],
-            "b_significantly_better_mae": row["b_significantly_better_mae_bh"],
-            "dm_p_value_squared_loss": row["dm_p_adj_squared_loss"],
-            "dm_p_value_absolute_loss": row["dm_p_adj_absolute_loss"],
-        }
-        return plain_language_verdict(adj_row, row["model_a"], row["model_b"])
-
-    out["verdict_bh"] = out.apply(_adjusted_verdict, axis=1)
-    return out
-
-
-# ---------------------------------------------------------------------------
-# 5. Clark-West (2007) Adjusted MSPE Test for Nested Models (Issue #88)
+# 4. Clark-West (2007) Adjusted MSPE Test for Nested Models (Issue #88)
 # ---------------------------------------------------------------------------
 
 def clark_west_test(
@@ -451,9 +370,9 @@ def clark_west_test(
         - For h=1 (1-step ahead, no forecast overlap): sample variance s_f^2 / N.
         - For h>1 (multi-step overlapping horizons): Heteroskedasticity and
           Autocorrelation Consistent (HAC / Newey-West) variance estimator with
-          Bartlett kernel and truncation lag J = h - 1.
-        - Optional Harvey, Leybourne & Newbold (1997) small-sample modification factor:
-          HLN = (N + 1 - 2*h + h*(h-1)/N) / N.
+          Bartlett kernel and truncation lag J = h - 1, preserving calendar lag distances.
+        - Harvey, Leybourne & Newbold (1997) small-sample modification factor:
+          HLN = ((N - h) * (N - h + 1)) / (N^2).
 
     Hypothesis Testing:
         - One-sided test: H0: MSPE_1 <= MSPE_2 vs. H1: MSPE_1 > MSPE_2
@@ -464,14 +383,14 @@ def clark_west_test(
     y1 = np.asarray(pred_benchmark, dtype=float)
     y2 = np.asarray(pred_model, dtype=float)
 
-    # Filter out NaNs if any exist
-    valid = np.isfinite(y) & np.isfinite(y1) & np.isfinite(y2)
-    y, y1, y2 = y[valid], y1[valid], y2[valid]
-    n = len(y)
+    if len(y) != len(y1) or len(y) != len(y2):
+        raise ValueError("actual, pred_benchmark, and pred_model must have identical lengths")
 
-    if n <= h or n < 3:
+    # Trim leading and trailing all-NaN / invalid periods to isolate active evaluation span
+    valid_mask = np.isfinite(y) & np.isfinite(y1) & np.isfinite(y2)
+    if not np.any(valid_mask):
         return {
-            "n_forecasts": n,
+            "n_forecasts": 0,
             "mspe_naive": None,
             "mspe_model": None,
             "cw_adjustment": None,
@@ -484,17 +403,48 @@ def clark_west_test(
             "insufficient_sample": True,
         }
 
-    e1 = y - y1
-    e2 = y - y2
-    mspe_1 = float(np.mean(e1**2))
-    mspe_2 = float(np.mean(e2**2))
-    adj = float(np.mean((y1 - y2)**2))
+    first_idx = int(np.argmax(valid_mask))
+    last_idx = int(len(valid_mask) - 1 - np.argmax(valid_mask[::-1]))
+
+    y_span = y[first_idx : last_idx + 1]
+    y1_span = y1[first_idx : last_idx + 1]
+    y2_span = y2[first_idx : last_idx + 1]
+    valid_span = valid_mask[first_idx : last_idx + 1]
+    n_valid = int(np.sum(valid_span))
+
+    if n_valid <= h or n_valid < 3:
+        return {
+            "n_forecasts": n_valid,
+            "mspe_naive": None,
+            "mspe_model": None,
+            "cw_adjustment": None,
+            "mspe_model_adj": None,
+            "mean_f_stat": None,
+            "se_f_stat": None,
+            "cw_stat": None,
+            "cw_p_value": None,
+            "model_significantly_better": False,
+            "insufficient_sample": True,
+        }
+
+    e1_v = y_span[valid_span] - y1_span[valid_span]
+    e2_v = y_span[valid_span] - y2_span[valid_span]
+    adj_v = (y1_span[valid_span] - y2_span[valid_span]) ** 2
+
+    mspe_1 = float(np.mean(e1_v ** 2))
+    mspe_2 = float(np.mean(e2_v ** 2))
+    adj = float(np.mean(adj_v))
     mspe_2_adj = float(mspe_2 - adj)
 
-    f_t = e1**2 - (e2**2 - (y1 - y2)**2)
-    f_bar = float(np.mean(f_t))
-    z = f_t - f_bar
-    gamma0 = float(np.mean(z**2))
+    f_valid = e1_v ** 2 - (e2_v ** 2 - adj_v)
+    f_bar = float(np.mean(f_valid))
+
+    # Place f on calendar time span to preserve exact lag distances across any interior gaps
+    f_span = np.full(len(y_span), np.nan)
+    f_span[valid_span] = f_valid
+    z = np.where(valid_span, f_span - f_bar, 0.0)
+
+    gamma0 = float(np.sum(z ** 2) / n_valid)
 
     if h <= 1:
         omega = gamma0
@@ -502,16 +452,15 @@ def clark_west_test(
         omega = gamma0
         for k in range(1, h):
             weight = 1.0 - (k / h)
-            gamma_k = float(np.sum(z[k:] * z[:-k]) / n)
+            gamma_k = float(np.sum(z[k:] * z[:-k]) / n_valid)
             omega += 2.0 * weight * gamma_k
 
     omega = max(omega, 1e-14)
-    var_f = omega / n
+    var_f = omega / n_valid
 
     if small_sample_adj:
-        hln = (n + 1 - 2 * h + (h * (h - 1)) / n) / n
-        if hln > 0:
-            var_f = var_f / hln
+        hln = ((n_valid - h) * (n_valid - h + 1)) / (n_valid * n_valid)
+        var_f = var_f / hln
 
     se_f = float(np.sqrt(var_f))
     cw_stat = float(f_bar / se_f) if se_f > 0 else 0.0
@@ -520,7 +469,7 @@ def clark_west_test(
     model_better = bool(cw_p_value < alpha and cw_stat > 0)
 
     return {
-        "n_forecasts": n,
+        "n_forecasts": n_valid,
         "mspe_naive": round(mspe_1, 6),
         "mspe_model": round(mspe_2, 6),
         "cw_adjustment": round(adj, 6),

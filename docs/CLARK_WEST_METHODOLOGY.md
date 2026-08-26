@@ -85,7 +85,7 @@ The evaluation matrix comprises **4 primary model paradigms × 3 horizons = 12 h
 | **VAR-AIC** | 20 days | 750 | 0.015639 | 0.015832 | 0.000949 | 0.014883 | +0.970 | 0.1660 | 0.6230 | 0.2969 |
 | **VECM (6-var)** | 1 day | 750 | 0.000841 | 0.000884 | 0.000050 | 0.000834 | +0.452 | 0.3257 | 0.6514 | 0.8309 |
 | **VECM (6-var)** | 5 days | 750 | 0.003741 | 0.004033 | 0.000360 | 0.003673 | +0.645 | 0.2596 | 0.6230 | 0.5192 |
-| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | 0.001910 | **0.013439** | **+1.973** | **0.0242** | 0.2904 | **0.0968** |
+| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | 0.001910 | **0.013439** | **+1.973** | **0.0242** | 0.2904 | 0.0968 |
 | **LSTM (Tuned)** | 1 day | 745 | 0.000843 | 0.000853 | 0.000004 | 0.000849 | -1.390 | 0.9177 | 0.9177 | 0.9177 |
 | **LSTM (Tuned)** | 5 days | 745 | 0.003754 | 0.003761 | 0.000057 | **0.003705** | **+1.578** | **0.0573** | 0.3438 | 0.2292 |
 | **LSTM (Tuned)** | 20 days | 745 | 0.015702 | 0.016014 | 0.000668 | 0.015347 | +0.763 | 0.2227 | 0.6230 | 0.2969 |
@@ -111,30 +111,32 @@ At the 1-day horizon ($h=1$), all four models fail to reject the null hypothesis
 
 Rather than reflecting a failure of statistical or neural modeling, this finding is directly predicted by capital market theory:
 1. **Efficient Market Hypothesis (Fama, 1970; Campbell, Lo, & MacKinlay, 1997)**: Government bond markets incorporate public macro-financial information rapidly. Daily fluctuations in sovereign yield spreads behave as a **Martingale Difference Sequence** ($\mathbb{E}[\Delta s_{t+1} \mid \mathcal{I}_t] = 0$).
-2. **Horizon-Dependent Predictability**: While daily innovations are dominated by unforecastable news arrivals, predictable structure emerges at longer horizons:
-   - At $h=5$ days, the **LSTM network** captures short-term nonlinear momentum ($CW = 1.578, p = 0.0573$).
-   - At $h=20$ days, the **VECM framework** captures cointegrating equilibrium mean-reversion across Canadian and U.S. yields ($CW = 1.973, p = 0.0242, q_{\text{horiz}} = 0.0968$).
+2. **Horizon-Dependent Dynamics**: While daily innovations are dominated by unforecastable news arrivals, medium-term structure emerges at longer horizons:
+   - At $h=5$ days, the **LSTM network** captures short-term nonlinear momentum ($CW = 1.578, p_{\text{raw}} = 0.0573$).
+   - At $h=20$ days, the **VECM framework** captures cointegrating equilibrium adjustments across Canadian and U.S. yields, producing a raw unadjusted reduction in MSPE ($CW = 1.973, p_{\text{raw}} = 0.0242$).
 
 ---
 
 ## 5. Multiplicity Control (Benjamini-Hochberg FDR)
 
-To address the simultaneous testing risk across the 12 primary hypotheses, Benjamini-Hochberg (1995) FDR control is reported at two granularities:
+To address simultaneous testing risk across the 12 primary hypotheses, Benjamini-Hochberg (1995) FDR control is reported at two granularities:
 1. **Global 12-Test FDR (`q_global`)**: Controls FDR across the entire $4 \times 3$ matrix.
-2. **Horizon-Stratified FDR (`q_horizon`)**: Partitions testing into three independent horizon families ($k=4$ per horizon). This ensures that long-horizon variance at $h=20$ does not inflate discovery thresholds for short-horizon tests at $h=1, 5$ (Issue #81).
+2. **Horizon-Stratified FDR (`q_horizon`)**: Partitions testing into three independent horizon families ($k=4$ per horizon), ensuring that long-horizon variance at $h=20$ does not inflate discovery thresholds for short-horizon tests at $h=1, 5$ (Issue #81).
 
-Under Horizon-Stratified FDR:
-- **VECM (6-var) at $h=20$** achieves $q = 0.0968$, confirming significant predictive value at the 10% FDR threshold.
-- **LSTM (Tuned) at $h=5$** achieves $q = 0.2292$ (near-significance at raw $p = 0.0573$).
+### Key FDR Findings at Committed $\alpha = 0.05$:
+- **No model rejects the null hypothesis at the pre-committed $\alpha = 0.05$ threshold under either Global or Horizon-Stratified FDR control**.
+- **VECM (6-var) at $h=20$**: Shows unadjusted raw significance ($p_{\text{raw}} = 0.0242$), but after horizon-stratified FDR control achieves $q_{\text{horizon}} = 0.0968 > 0.05$ (and $q_{\text{global}} = 0.2904$). It would only clear an exploratory $\alpha = 0.10$ threshold, but at the confirmatory $\alpha = 0.05$ standard, it fails to reject equal accuracy (`model_significantly_better_fdr_horizon = False`).
+- **LSTM (Tuned) at $h=5$**: Achieves raw $p = 0.0573$ and $q_{\text{horizon}} = 0.2292$.
+- **Headline Operational Takeaway**: Across all 4 paradigms and 3 horizons, the **Naïve Random Walk benchmark remains statistically unbeaten at $\alpha = 0.05$ after multiplicity control**, reinforcing the high-frequency informational efficiency of the Canadian sovereign bond market.
 
 ---
 
 ## 6. Verification and Implementation Checklist
 
-- [x] Implemented `clark_west_test()` with Newey-West HAC covariance estimation in `src/model_comparison.py`.
+- [x] Implemented `clark_west_test()` with calendar-safe Newey-West HAC covariance estimation in `src/model_comparison.py`.
 - [x] Implemented `run_clark_west_battery()` executing the 12 primary tests and sensitivity checks.
 - [x] Applied Global and Horizon-Stratified Benjamini-Hochberg FDR control in `apply_clark_west_fdr()`.
 - [x] Generated canonical output datasets `outputs/clark_west_test_results.csv` and `outputs/clark_west_sensitivity_results.csv`.
 - [x] Built and pre-rendered Jupyter notebook `notebooks/04_diagnostics/clark_west_comparison.ipynb`.
-- [x] Added 7 new unit tests in `tests/test_model_comparison.py` (25/25 passing).
+- [x] Unit tests in `tests/test_model_comparison.py` passing (20/20 passing).
 - [x] Documented mathematical foundations, #68 caveat resolution, and EMH/Martingale economic framing.
