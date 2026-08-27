@@ -53,3 +53,27 @@ def test_vif_drops_rows_with_missing_values():
     df.loc[0, "a"] = np.nan
     out = compute_vif(df, ["a", "b", "c"])
     assert out["vif"].notna().all()
+
+
+def test_vif_raises_on_constant_feature_column():
+    """Issue #96: a flat regressor (e.g. a pegged policy rate) must not
+    silently make add_constant() skip the intercept."""
+    df = _independent_df()
+    df["flat"] = 5.0
+    try:
+        compute_vif(df, ["a", "b", "flat"])
+        assert False, "expected ValueError for a constant feature column"
+    except ValueError:
+        pass
+
+
+def test_vif_raises_on_empty_overlap():
+    """Issue #96: columns with no shared non-NaN rows must raise, not
+    silently report VIF = inf for everything."""
+    df = _independent_df()
+    df["a"] = np.nan
+    try:
+        compute_vif(df, ["a", "b", "c"])
+        assert False, "expected ValueError for an empty design matrix"
+    except ValueError:
+        pass

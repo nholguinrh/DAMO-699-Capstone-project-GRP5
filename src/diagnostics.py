@@ -34,8 +34,20 @@ def compute_vif(df: pd.DataFrame, columns: list) -> pd.DataFrame:
     explicit `matrix_rank` check rather than relying on the large-but-finite
     float variance_inflation_factor's matrix inversion happens to return
     under floating-point noise.
+
+    Raises ValueError if `columns` has no overlapping non-NaN rows (nothing
+    to compute VIF on), or if one of `columns` is itself an exact constant
+    -- add_constant() would otherwise silently skip adding the intercept in
+    that case, contradicting the "always includes an intercept" guarantee
+    above.
     """
-    X = add_constant(df[columns].dropna())
+    X = df[columns].dropna()
+    if X.empty:
+        raise ValueError(
+            f"No overlapping non-NaN rows across columns {columns}; "
+            "cannot compute VIF on an empty design matrix."
+        )
+    X = add_constant(X, has_constant="raise")
     full_rank = np.linalg.matrix_rank(X.values)
 
     vifs = []
