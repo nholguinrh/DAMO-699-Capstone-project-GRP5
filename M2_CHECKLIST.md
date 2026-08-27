@@ -132,7 +132,7 @@ merge on `origin_date`.
 
 **Aug 20 — `#50` (pairwise Diebold-Mariano across all Round 3 baselines) shipped.** Seven arms
 compared pairwise at all three horizons — Naive, ARIMA-AIC, ARIMA-BIC, VAR-AIC, VAR-BIC, VECM
-(6-var), LSTM (21 pairs x 3 horizons = 63 tests, `notebooks/04_diagnostics/dm_pairwise_comparison.ipynb`,
+(6-var), LSTM (21 pairs x 3 horizons = 63 tests, `notebooks/04_diagnostics/clark_west_comparison.ipynb` [formerly `dm_pairwise_comparison.ipynb`, migrated to Clark-West vs Naïve per Issue #88],
 `outputs/r3_pairwise_diebold_mariano.csv`). Decisions made along the way:
 
 - ARIMA-AIC and ARIMA-BIC kept as separate arms, mirroring the VAR-AIC/VAR-BIC sensitivity-check
