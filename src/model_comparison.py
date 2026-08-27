@@ -444,7 +444,7 @@ def clark_west_test(
     f_span[valid_span] = f_valid
     z = np.where(valid_span, f_span - f_bar, 0.0)
 
-    gamma0 = float(np.sum(z ** 2) / n_valid)
+    gamma0 = float(np.sum(z[valid_span] ** 2) / n_valid)
 
     if h <= 1:
         omega = gamma0
@@ -452,7 +452,13 @@ def clark_west_test(
         omega = gamma0
         for k in range(1, h):
             weight = 1.0 - (k / h)
-            gamma_k = float(np.sum(z[k:] * z[:-k]) / n_valid)
+            # Both t and t-k must be valid for the lag-k product to be real
+            valid_pairs = valid_span[k:] & valid_span[:-k]
+            n_pairs = int(np.sum(valid_pairs))
+            if n_pairs > 0:
+                gamma_k = float(np.sum(z[k:] * z[:-k] * valid_pairs) / n_pairs)
+            else:
+                gamma_k = 0.0
             omega += 2.0 * weight * gamma_k
 
     omega = max(omega, 1e-14)
@@ -477,6 +483,7 @@ def clark_west_test(
         "mean_f_stat": round(f_bar, 6),
         "se_f_stat": round(se_f, 6),
         "cw_stat": round(cw_stat, 3),
+        "cw_stat_raw": cw_stat,
         "cw_p_value": round(cw_p_value, 4),
         "model_significantly_better": model_better,
         "insufficient_sample": False,
@@ -535,8 +542,12 @@ def run_clark_west_battery(
         (primary_12_df, sensitivity_df)
     """
     core = load_core()
-    d_min = date_min if date_min is not None else core["origin_date"].min()
-    d_max = date_max if date_max is not None else core["origin_date"].max()
+    d_min = pd.Timestamp(date_min) if date_min is not None else core["origin_date"].min()
+    d_max = pd.Timestamp(date_max) if date_max is not None else core["origin_date"].max()
+
+    # Filter core to the same window applied to VECM/LSTM so all arms
+    # are scored over an identical sample span (Nelson review point 2).
+    core = core[(core["origin_date"] >= d_min) & (core["origin_date"] <= d_max)]
 
     vecm = load_vecm(d_min, d_max)
     lstm = load_lstm(d_min, d_max)
@@ -633,46 +644,41 @@ def apply_clark_west_fdr(cw_df: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
             )
             out.loc[h_mask, "cw_p_adj_horizon"] = np.round(p_adj_h, 4)
 
-    # Significance flags (requires p_adj < alpha AND cw_stat > 0)
+    # Significance flags (requires p_adj < alpha AND cw_stat > 0).
+    # Use the unrounded cw_stat_raw for the sign check to avoid rounding
+    # artifacts near zero (Nelson review point 4).
+    sign_col = "cw_stat_raw" if "cw_stat_raw" in out.columns else "cw_stat"
     out["model_significantly_better_fdr_global"] = (
         out["cw_p_adj_global"].notna()
         & (out["cw_p_adj_global"] < alpha)
-        & (out["cw_stat"] > 0)
+        & (out[sign_col] > 0)
     )
     out["model_significantly_better_fdr_horizon"] = (
         out["cw_p_adj_horizon"].notna()
         & (out["cw_p_adj_horizon"] < alpha)
-        & (out["cw_stat"] > 0)
+        & (out[sign_col] > 0)
     )
 
-    # Verdicts under FDR
-    def _verdict_glob(row: pd.Series) -> str:
+    # Verdicts under FDR — single parameterized helper to avoid drift
+    # between global and horizon tiers (Nelson review point 5).
+    def _fdr_verdict(row: pd.Series, sig_col: str, p_adj_col: str) -> str:
         r_dict = {
             "insufficient_sample": row["insufficient_sample"],
             "n_forecasts": row["n_forecasts"],
-            "model_significantly_better": row["model_significantly_better_fdr_global"],
+            "model_significantly_better": row[sig_col],
             "cw_stat": row["cw_stat"],
-            "cw_p_value": row["cw_p_adj_global"],
+            "cw_p_value": row[p_adj_col],
             "mspe_naive": row["mspe_naive"],
             "mspe_model": row["mspe_model"],
             "mspe_model_adj": row["mspe_model_adj"],
         }
         return plain_language_verdict_cw(r_dict, row["model"])
 
-    def _verdict_horiz(row: pd.Series) -> str:
-        r_dict = {
-            "insufficient_sample": row["insufficient_sample"],
-            "n_forecasts": row["n_forecasts"],
-            "model_significantly_better": row["model_significantly_better_fdr_horizon"],
-            "cw_stat": row["cw_stat"],
-            "cw_p_value": row["cw_p_adj_horizon"],
-            "mspe_naive": row["mspe_naive"],
-            "mspe_model": row["mspe_model"],
-            "mspe_model_adj": row["mspe_model_adj"],
-        }
-        return plain_language_verdict_cw(r_dict, row["model"])
-
-    out["verdict_fdr_global"] = out.apply(_verdict_glob, axis=1)
-    out["verdict_fdr_horizon"] = out.apply(_verdict_horiz, axis=1)
+    out["verdict_fdr_global"] = out.apply(
+        lambda r: _fdr_verdict(r, "model_significantly_better_fdr_global", "cw_p_adj_global"), axis=1
+    )
+    out["verdict_fdr_horizon"] = out.apply(
+        lambda r: _fdr_verdict(r, "model_significantly_better_fdr_horizon", "cw_p_adj_horizon"), axis=1
+    )
 
     return out

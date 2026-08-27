@@ -205,9 +205,14 @@ def test_clark_west_internal_gap_preserves_calendar_lags():
     """
     Tests that series with leading, trailing, and interior NaNs correctly isolate
     valid evaluation periods and preserve calendar-time lag distances for HAC
-    autocovariance estimation without throwing errors or splicing non-adjacent time points.
+    autocovariance estimation without throwing errors or splicing non-adjacent
+    time points.
+
+    The key econometric invariant tested here: the variance estimate from the
+    gappy series must NOT be smaller than the estimate from the same series with
+    the gap filled — if it were, the HAC denominator would be artificially
+    deflating the variance and inflating |cw_stat|, producing false significance.
     """
-    # Series of 50 steps with an interior gap of 5 missing observations
     n = 50
     rng = np.random.default_rng(42)
     actual = np.linspace(1.0, 5.0, n)
@@ -220,12 +225,20 @@ def test_clark_west_internal_gap_preserves_calendar_lags():
     actual_gap[20:25] = np.nan # interior gap
     actual_gap[48:] = np.nan   # trailing NaNs
 
-    res = clark_west_test(actual_gap, naive, pred, h=5)
-    assert not res["insufficient_sample"]
-    assert res["n_forecasts"] == 50 - 2 - 5 - 2  # 41 valid observations
-    assert res["se_f_stat"] > 0
-    assert np.isfinite(res["cw_stat"])
-    assert 0.0 <= res["cw_p_value"] <= 1.0
+    res_gap = clark_west_test(actual_gap, naive, pred, h=5)
+    assert not res_gap["insufficient_sample"]
+    assert res_gap["n_forecasts"] == 50 - 2 - 5 - 2  # 41 valid observations
+    assert res_gap["se_f_stat"] > 0
+    assert np.isfinite(res_gap["cw_stat"])
+    assert 0.0 <= res_gap["cw_p_value"] <= 1.0
+
+    # Compare against the contiguous (gap-free) series trimmed to the same span
+    # The gappy variance should be >= the contiguous variance (no false deflation)
+    res_full = clark_west_test(actual[2:48], naive[2:48], pred[2:48], h=5)
+    assert res_gap["se_f_stat"] >= res_full["se_f_stat"] * 0.95, (
+        f"Gappy se_f ({res_gap['se_f_stat']:.6f}) is suspiciously smaller than "
+        f"contiguous se_f ({res_full['se_f_stat']:.6f}), suggesting HAC denominator deflation"
+    )
 
 
 # ---------------------------------------------------------------------------
