@@ -35,17 +35,28 @@ def compute_vif(df: pd.DataFrame, columns: list) -> pd.DataFrame:
     float variance_inflation_factor's matrix inversion happens to return
     under floating-point noise.
 
-    Raises ValueError if `columns` has no overlapping non-NaN rows (nothing
-    to compute VIF on), or if one of `columns` is itself an exact constant
-    -- add_constant() would otherwise silently skip adding the intercept in
-    that case, contradicting the "always includes an intercept" guarantee
-    above.
+    Raises ValueError if `columns` has too few overlapping non-NaN rows to
+    determine rank against the design matrix (including the intercept, that's
+    len(columns) + 1 rows at minimum -- fewer than that and the matrix_rank
+    comparison below can't distinguish "not enough data" from genuine
+    collinearity, and would silently report every column as inf), or if one
+    of `columns` is itself an exact constant -- silently omitting the
+    intercept in that case would contradict the "always includes an
+    intercept" guarantee above.
     """
     X = df[columns].dropna()
-    if X.empty:
+    if len(X) <= len(columns):
         raise ValueError(
-            f"No overlapping non-NaN rows across columns {columns}; "
-            "cannot compute VIF on an empty design matrix."
+            f"Only {len(X)} overlapping non-NaN row(s) across columns "
+            f"{columns}; need more than {len(columns)} to compute VIF "
+            "against a design matrix that includes an intercept."
+        )
+    constant_cols = [c for c in columns if X[c].nunique() <= 1]
+    if constant_cols:
+        raise ValueError(
+            f"Columns {constant_cols} are exact constants over the "
+            "overlapping non-NaN rows; VIF requires an intercept plus "
+            "genuinely varying regressors."
         )
     X = add_constant(X, has_constant="raise")
     full_rank = np.linalg.matrix_rank(X.values)

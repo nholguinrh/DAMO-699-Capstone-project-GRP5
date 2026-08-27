@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
@@ -60,11 +61,17 @@ def test_vif_raises_on_constant_feature_column():
     silently make add_constant() skip the intercept."""
     df = _independent_df()
     df["flat"] = 5.0
-    try:
+    with pytest.raises(ValueError, match="exact constants"):
         compute_vif(df, ["a", "b", "flat"])
-        assert False, "expected ValueError for a constant feature column"
-    except ValueError:
-        pass
+
+
+def test_vif_raises_on_zero_valued_constant_feature_column():
+    """Issue #96 follow-up: statsmodels' has_constant='raise' only flags a
+    *nonzero* constant, so an exact-zero column must be caught separately."""
+    df = _independent_df()
+    df["zero"] = 0.0
+    with pytest.raises(ValueError, match="exact constants"):
+        compute_vif(df, ["a", "b", "zero"])
 
 
 def test_vif_raises_on_empty_overlap():
@@ -72,8 +79,14 @@ def test_vif_raises_on_empty_overlap():
     silently report VIF = inf for everything."""
     df = _independent_df()
     df["a"] = np.nan
-    try:
+    with pytest.raises(ValueError, match="overlapping non-NaN row"):
         compute_vif(df, ["a", "b", "c"])
-        assert False, "expected ValueError for an empty design matrix"
-    except ValueError:
-        pass
+
+
+def test_vif_raises_on_underdetermined_design_matrix():
+    """Issue #96 follow-up: too few rows relative to columns is rank-deficient
+    for the same reason as an empty overlap, and must raise rather than
+    silently reporting every column as vif=inf."""
+    df = _independent_df(n=3)
+    with pytest.raises(ValueError, match="Only 3 overlapping"):
+        compute_vif(df, ["a", "b", "c"])
