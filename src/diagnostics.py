@@ -58,6 +58,8 @@ def compute_vif(df: pd.DataFrame, columns: list) -> pd.DataFrame:
             "overlapping non-NaN rows; VIF requires an intercept plus "
             "genuinely varying regressors."
         )
+    # Backstop, not a substitute for the nunique check above -- has_constant="raise" only
+    # catches a nonzero constant, so it alone would miss an exact-zero column.
     X = add_constant(X, has_constant="raise")
     full_rank = np.linalg.matrix_rank(X.values)
 
