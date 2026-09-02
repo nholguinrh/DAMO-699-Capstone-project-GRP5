@@ -9,6 +9,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from http_utils import get_with_retry
+from pipeline_dates import clamp_to_range, resolve_date_range
 from project_paths import PROJECT_ROOT, PROCESSED_DIR, RAW_DIR
 
 
@@ -27,9 +28,6 @@ PROCESSED_FILE = PROCESSED_DIR / "fred_rates.csv"
 # ---------------------------------------------------------
 # 2. FRED configuration
 # ---------------------------------------------------------
-
-START_DATE = "2009-01-02"
-END_DATE = "2026-06-30"
 
 BASE_URL = (
     "https://api.stlouisfed.org/"
@@ -78,10 +76,18 @@ def load_api_key() -> str:
 def download_series(
     series_id: str,
     api_key: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> Path:
     """
     Download one FRED series using synchronous requests and
     manual exponential back-off supplied by get_with_retry().
+
+    Parameters
+    ----------
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the observation window.
+        Default to ``config.DATE_START`` / ``config.DATE_END``.
 
     Returns
     -------
@@ -94,14 +100,16 @@ def download_series(
             f"Unsupported FRED series: {series_id}"
         )
 
+    start, end = resolve_date_range(start_date, end_date)
+
     print(f"\nDownloading FRED series {series_id}...")
 
     params = {
         "series_id": series_id,
         "api_key": api_key,
         "file_type": "json",
-        "observation_start": START_DATE,
-        "observation_end": END_DATE,
+        "observation_start": start,
+        "observation_end": end,
     }
 
     response = get_with_retry(
@@ -165,12 +173,18 @@ def download_series(
 # 5. Download all FRED series sequentially
 # ---------------------------------------------------------
 
-def download_all_series() -> dict[str, Path]:
+def download_all_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, Path]:
     """
     Download each configured FRED series sequentially.
 
     DGS10 is downloaded first, followed by DFF.
     No concurrent or asynchronous requests are used.
+
+    ``start_date`` / ``end_date`` are optional ISO overrides for the
+    observation window (default ``config.DATE_START`` / ``config.DATE_END``).
     """
 
     api_key = load_api_key()
@@ -181,6 +195,8 @@ def download_all_series() -> dict[str, Path]:
         raw_files[series_id] = download_series(
             series_id=series_id,
             api_key=api_key,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     return raw_files
@@ -513,6 +529,8 @@ def save_processed_data(
 def run(
     use_cache: bool = False,
     cache_files: dict[str, Path] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
     """
     Run the complete FRED ingestion pipeline.
@@ -531,6 +549,12 @@ def run(
             "DFF": Path(...)
         }
 
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the ingestion window.
+        Default to ``config.DATE_START`` / ``config.DATE_END``. The final
+        dataset is clamped to this range, so ``use_cache=True`` also honours
+        a narrower ``end_date`` (it cannot extend past what is cached).
+
     Returns
     -------
     pandas.DataFrame
@@ -538,9 +562,11 @@ def run(
     """
 
     pipeline_start = time.perf_counter()
+    start, end = resolve_date_range(start_date, end_date)
 
     print("\n" + "=" * 60)
     print("FRED DATA INGESTION")
+    print(f"Window: {start} to {end}")
     print("=" * 60)
 
     if use_cache:
@@ -573,7 +599,7 @@ def run(
                 print(raw_file)
 
     else:
-        raw_files = download_all_series()
+        raw_files = download_all_series(start_date=start, end_date=end)
 
     series_frames = {}
 
@@ -594,6 +620,8 @@ def run(
     fred_df = merge_series_dataframes(
         series_frames
     )
+
+    fred_df = clamp_to_range(fred_df, "date", start, end)
 
     validate_dataframe(fred_df)
 
@@ -660,6 +688,18 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--start-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) start of the ingestion window. Defaults to config.DATE_START.",
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) end of the ingestion window. Defaults to config.DATE_END.",
+    )
+
     return parser.parse_args()
 
 
@@ -710,4 +750,6 @@ if __name__ == "__main__":
     run(
         use_cache=arguments.from_cache,
         cache_files=selected_cache_files,
+        start_date=arguments.start_date,
+        end_date=arguments.end_date,
     )

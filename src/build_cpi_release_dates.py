@@ -295,10 +295,23 @@ def fetch_from_annual_calendars(years: range) -> dict[datetime, datetime]:
 # Shared validation / write helpers
 # ---------------------------------------------------------------------
 
-def missing_months(mapping: dict[datetime, datetime]) -> list[str]:
+def _coerce_target_end(target_end: str | datetime | None) -> datetime:
+    """Normalise a target end (str / datetime / None) to a datetime; None → TARGET_END."""
+    if target_end is None:
+        return TARGET_END
+    if isinstance(target_end, datetime):
+        return target_end
+    return datetime.strptime(str(target_end).strip()[:10], "%Y-%m-%d")
+
+
+def missing_months(
+    mapping: dict[datetime, datetime],
+    target_end: str | datetime | None = None,
+) -> list[str]:
+    end = _coerce_target_end(target_end)
     missing = []
     cursor = TARGET_START
-    while cursor <= TARGET_END:
+    while cursor <= end:
         if cursor not in mapping:
             missing.append(cursor.strftime("%Y-%m"))
         cursor = datetime(
@@ -309,10 +322,16 @@ def missing_months(mapping: dict[datetime, datetime]) -> list[str]:
     return missing
 
 
-def is_mapping_complete(csv_path: Path = OUTPUT_PATH) -> bool:
+def is_mapping_complete(
+    csv_path: Path = OUTPUT_PATH,
+    target_end: str | datetime | None = None,
+) -> bool:
     """
     Lightweight, no-network check used by other pipeline code (e.g.
     run_data_collection.py) to decide whether a refresh is needed.
+
+    ``target_end`` defaults to ``TARGET_END``; pass a later date to check
+    whether the mapping already covers an extended ingestion window.
     """
 
     if not csv_path.exists():
@@ -327,20 +346,24 @@ def is_mapping_complete(csv_path: Path = OUTPUT_PATH) -> bool:
                 release_str, "%Y-%m-%d"
             )
 
-    return len(missing_months(mapping)) == 0
+    return len(missing_months(mapping, target_end)) == 0
 
 
-def build_mapping() -> dict[datetime, datetime]:
+def build_mapping(
+    target_end: str | datetime | None = None,
+) -> dict[datetime, datetime]:
     """
     Build the full mapping: JSON feed as primary source, annual
     calendar scraper as fallback only for months the JSON feed
     doesn't cover (pre-2012).
+
+    ``target_end`` extends the coverage check forward (default ``TARGET_END``).
     """
 
     mapping = fetch_from_json_feed()
 
     still_missing = [
-        m for m in missing_months(mapping)
+        m for m in missing_months(mapping, target_end)
         if datetime.strptime(m, "%Y-%m") < datetime(2012, 3, 1)
     ]
     if still_missing:
@@ -374,25 +397,38 @@ def build_mapping() -> dict[datetime, datetime]:
     return mapping
 
 
-def write_mapping(mapping: dict[datetime, datetime], csv_path: Path = OUTPUT_PATH) -> None:
+def write_mapping(
+    mapping: dict[datetime, datetime],
+    csv_path: Path = OUTPUT_PATH,
+    target_end: str | datetime | None = None,
+) -> None:
+    end = _coerce_target_end(target_end)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("reference_month,release_date\n")
         for ref_month in sorted(mapping):
-            if TARGET_START <= ref_month <= TARGET_END:
+            if TARGET_START <= ref_month <= end:
                 f.write(f"{ref_month:%Y-%m-01},{mapping[ref_month]:%Y-%m-%d}\n")
 
 
-def refresh(csv_path: Path = OUTPUT_PATH) -> None:
+def refresh(
+    csv_path: Path = OUTPUT_PATH,
+    target_end: str | datetime | None = None,
+) -> None:
     """
     Public entry point for other modules to import, e.g.:
         from build_cpi_release_dates import refresh
         refresh()
+
+    ``target_end`` (str / datetime, default ``TARGET_END``) extends the mapped
+    window forward when the ingestion pipeline pulls past the current cut-off.
     """
 
-    mapping = build_mapping()
+    end = _coerce_target_end(target_end)
 
-    missing = missing_months(mapping)
+    mapping = build_mapping(end)
+
+    missing = missing_months(mapping, end)
     if missing:
         print(f"\nWARNING: {len(missing)} months still missing a release date:")
         print(", ".join(missing))
@@ -400,11 +436,11 @@ def refresh(csv_path: Path = OUTPUT_PATH) -> None:
         print("check them manually before treating the mapping as complete.")
     else:
         print(f"\nComplete: all months from {TARGET_START:%Y-%m} to "
-              f"{TARGET_END:%Y-%m} are mapped.")
+              f"{end:%Y-%m} are mapped.")
 
-    write_mapping(mapping, csv_path)
+    write_mapping(mapping, csv_path, end)
 
-    print(f"\nWrote {len([m for m in mapping if TARGET_START <= m <= TARGET_END])} "
+    print(f"\nWrote {len([m for m in mapping if TARGET_START <= m <= end])} "
           f"rows to {csv_path}")
     print("Sources:")
     print(f"  Primary (2012-03 onward): {JSON_FEED_URL}")
@@ -413,4 +449,23 @@ def refresh(csv_path: Path = OUTPUT_PATH) -> None:
 
 
 if __name__ == "__main__":
-    refresh()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Rebuild config/cpi_release_dates.csv (CPI reference month -> "
+            "StatCan release date)."
+        )
+    )
+    parser.add_argument(
+        "--target-end",
+        default=None,
+        help=(
+            "ISO (YYYY-MM-DD) last reference month to map. Defaults to "
+            f"{TARGET_END:%Y-%m}. Use a later date when the ingestion window "
+            "is extended past the current cut-off."
+        ),
+    )
+    args = parser.parse_args()
+
+    refresh(target_end=args.target_end)
