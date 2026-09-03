@@ -48,6 +48,15 @@ def load_lstm_forecasts() -> pd.DataFrame:
     return df
 
 
+def load_xgboost_forecasts() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_forecasts.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df["origin_date"] = pd.to_datetime(df["origin_date"])
+    return df
+
+
 # =========================================================
 # EVALUATION OUTPUTS
 # =========================================================
@@ -72,12 +81,26 @@ def load_lstm_metrics() -> pd.DataFrame:
     return _read_csv("r3_lstm_vs_naive.csv")
 
 
+def load_xgboost_metrics() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_vs_naive.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
 # =========================================================
 # INTERPRETABILITY OUTPUTS
 # =========================================================
 
 def load_shap_summary() -> pd.DataFrame:
     return _read_csv("r3_lstm_shap_summary.csv")
+
+
+def load_xgboost_shap_summary() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_shap_summary.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
 
 
 def load_fevd_results() -> pd.DataFrame:
@@ -161,11 +184,27 @@ def build_common_forecast_dataset() -> pd.DataFrame:
         .merge(lstm, on=keys, how="inner")
     )
 
-    for col in [
-        "actual_var",
-        "actual_vecm",
-        "actual_lstm",
-    ]:
+    xgb = load_xgboost_forecasts()
+    has_xgb = False
+    if xgb is not None and not xgb.empty:
+        xgb_sub = xgb[
+            keys + ["actual", "naive", "xgboost", "lower_90", "upper_90", "lower_95", "upper_95"]
+        ].rename(
+            columns={
+                "actual": "actual_xgb",
+                "naive": "naive_xgb",
+            }
+        )
+        common = common.merge(xgb_sub, on=keys, how="inner")
+        has_xgb = True
+
+    check_actual_cols = ["actual_var", "actual_vecm", "actual_lstm"]
+    check_naive_cols = ["naive_var", "naive_vecm", "naive_lstm"]
+    if has_xgb:
+        check_actual_cols.append("actual_xgb")
+        check_naive_cols.append("naive_xgb")
+
+    for col in check_actual_cols:
         if not np.allclose(
             common["actual_arima"],
             common[col],
@@ -177,11 +216,7 @@ def build_common_forecast_dataset() -> pd.DataFrame:
                 f"Actual values are inconsistent between ARIMA and {col}."
             )
 
-    for col in [
-        "naive_var",
-        "naive_vecm",
-        "naive_lstm",
-    ]:
+    for col in check_naive_cols:
         if not np.allclose(
             common["naive_arima"],
             common[col],
@@ -196,19 +231,21 @@ def build_common_forecast_dataset() -> pd.DataFrame:
     common["actual"] = common["actual_arima"]
     common["naive"] = common["naive_arima"]
 
+    out_cols = [
+        "origin_date",
+        "horizon",
+        "actual",
+        "naive",
+        "arima_aic",
+        "var_aic",
+        "vecm",
+        "lstm",
+    ]
+    if has_xgb:
+        out_cols.extend(["xgboost", "lower_90", "upper_90", "lower_95", "upper_95"])
+
     return (
-        common[
-            [
-                "origin_date",
-                "horizon",
-                "actual",
-                "naive",
-                "arima_aic",
-                "var_aic",
-                "vecm",
-                "lstm",
-            ]
-        ]
+        common[out_cols]
         .sort_values(["horizon", "origin_date"])
         .reset_index(drop=True)
     )
@@ -228,6 +265,9 @@ def build_common_sample_metrics() -> pd.DataFrame:
         "VECM": "vecm",
         "LSTM": "lstm",
     }
+    if "xgboost" in df.columns:
+        model_columns["XGBoost"] = "xgboost"
+
 
     rows = []
 
@@ -313,7 +353,7 @@ def get_pipeline_metadata() -> dict:
 
     return {
         "data_sources": 3,
-        "candidate_models": 4,
+        "candidate_models": "5 (+ Naïve)",
         "forecast_horizons": "1 / 5 / 20 days",
         "common_origins_per_horizon": int(
             common.groupby("horizon").size().min()
@@ -321,6 +361,7 @@ def get_pipeline_metadata() -> dict:
         "common_start_date": common["origin_date"].min(),
         "common_end_date": common["origin_date"].max(),
         "target": "Canadian 10Y–2Y yield spread",
+        "total_evaluations": len(common),
     }
 
 
@@ -390,3 +431,23 @@ def get_eda_findings() -> pd.DataFrame:
     ]
 
     return pd.DataFrame(rows)
+
+
+def load_regime_metrics() -> pd.DataFrame | None:
+    """
+    Loads macroeconomic monetary policy regime segmented metrics (Issue #101).
+    """
+    path = OUTPUTS_DIR / "r3_regime_segmented_metrics.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
+def load_xgboost_prediction_intervals() -> pd.DataFrame | None:
+    """
+    Loads XGBoost empirical coverage and interval width metrics (Issue #101).
+    """
+    path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)

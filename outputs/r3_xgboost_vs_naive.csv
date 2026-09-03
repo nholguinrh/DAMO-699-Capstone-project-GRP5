@@ -1,0 +1,4 @@
+horizon,n_forecasts,rmse_xgboost,rmse_naive,rmse_improvement_pct,mae_xgboost,mae_naive,mae_improvement_pct
+1,3728,0.03021,0.02882,-4.803,0.02157,0.02028,-6.376
+5,3728,0.06583,0.06307,-4.375,0.04894,0.0472,-3.688
+20,3728,0.12878,0.12613,-2.106,0.09793,0.09549,-2.554
