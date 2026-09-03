@@ -1,12 +1,5 @@
-import importlib
 import pandas as pd
 import streamlit as st
-
-import data_loader
-import charts
-
-importlib.reload(data_loader)
-importlib.reload(charts)
 
 from data_loader import (
     build_common_forecast_dataset,
@@ -224,7 +217,7 @@ with tab_data:
         st.metric(
             "Total Evaluations",
             pipeline_metadata.get("total_evaluations", 2235),
-            help="745 common origin dates × 3 horizons evaluated simultaneously",
+            help=f"{pipeline_metadata['common_origins_per_horizon']} common origin dates × 3 horizons evaluated simultaneously",
         )
 
     st.markdown("---")
@@ -238,8 +231,8 @@ with tab_data:
         st.markdown(
             """
             #### 🇨🇦 Bank of Canada (Valet API)
-            - **GoC 10Y Benchmark Yield** (`BD.GOC.10Y.M`)
-            - **GoC 2Y Benchmark Yield** (`BD.GOC.2Y.M`)
+            - **GoC 10Y Benchmark Yield** (`BD.CDN.10YR.DQ.YLD`)
+            - **GoC 2Y Benchmark Yield** (`BD.CDN.2YR.DQ.YLD`)
             - **Target Yield Spread** ($y_t = \\text{10Y} - \\text{2Y}$)
             - **Target First Difference** ($\\Delta y_t$)
             - **BoC Policy Overnight Rate** (`d_overnight_rate`)
@@ -306,10 +299,10 @@ Statistics Canada API ──┘           ↓
           └─────────────────────────┬─────────────────────────┘
                                     ↓
                       [EVALUATION & BENCHMARKING]
-                      • 5-Fold Expanding-Window Cross-Validation
-                      • Multi-Horizon Cumulative Targets (h = 1, 5, 20 Days)
-                      • Common Origin Alignment (745 Synchronized Dates)
-                      • Out-of-Sample RMSE, MAE, R²oos, and R²oos,adj
+                       • 5-Fold Expanding-Window Cross-Validation
+                       • Multi-Horizon Cumulative Targets (h = 1, 5, 20 Days)
+                       • Common Origin Alignment Across Synchronized Dates
+                       • Out-of-Sample RMSE, MAE, R²oos, and R²oos,adj
                       • Clark-West (2007) Tests + Benjamini-Hochberg FDR Control
                       • Calibrated Conformal / Quantile Prediction Intervals
                                     ↓
@@ -547,8 +540,8 @@ with tab_performance:
     )
 
     st.caption(
-        "Cross-model comparisons use the 745 forecast origins "
-        "shared simultaneously across all baselines and the experimental XGBoost model."
+        f"Cross-model comparisons use the {pipeline_metadata['common_origins_per_horizon']} forecast origins "
+        "shared simultaneously across the core models and available benchmarks."
     )
 
     if regime_metrics_df is not None:
@@ -988,7 +981,7 @@ with tab_decision:
         - Moderate neural-network sample size
         - Public-data-only feature coverage
         - Forecast performance may vary across market regimes
-        - Common visual sample uses 745 origins, while canonical
+        - Common visual sample uses dynamic common origins, while canonical
           Clark-West evaluation uses 750 forecasts per horizon
         """
     )

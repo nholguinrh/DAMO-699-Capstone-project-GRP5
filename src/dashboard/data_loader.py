@@ -184,27 +184,8 @@ def build_common_forecast_dataset() -> pd.DataFrame:
         .merge(lstm, on=keys, how="inner")
     )
 
-    xgb = load_xgboost_forecasts()
-    has_xgb = False
-    if xgb is not None and not xgb.empty:
-        xgb_sub = xgb[
-            keys + ["actual", "naive", "xgboost", "lower_90", "upper_90", "lower_95", "upper_95"]
-        ].rename(
-            columns={
-                "actual": "actual_xgb",
-                "naive": "naive_xgb",
-            }
-        )
-        common = common.merge(xgb_sub, on=keys, how="inner")
-        has_xgb = True
-
-    check_actual_cols = ["actual_var", "actual_vecm", "actual_lstm"]
-    check_naive_cols = ["naive_var", "naive_vecm", "naive_lstm"]
-    if has_xgb:
-        check_actual_cols.append("actual_xgb")
-        check_naive_cols.append("naive_xgb")
-
-    for col in check_actual_cols:
+    # Core 4-model parity check (strictly 745 common origins)
+    for col in ["actual_var", "actual_vecm", "actual_lstm"]:
         if not np.allclose(
             common["actual_arima"],
             common[col],
@@ -216,7 +197,7 @@ def build_common_forecast_dataset() -> pd.DataFrame:
                 f"Actual values are inconsistent between ARIMA and {col}."
             )
 
-    for col in check_naive_cols:
+    for col in ["naive_var", "naive_vecm", "naive_lstm"]:
         if not np.allclose(
             common["naive_arima"],
             common[col],
@@ -227,6 +208,44 @@ def build_common_forecast_dataset() -> pd.DataFrame:
             raise ValueError(
                 f"Naïve forecasts are inconsistent between ARIMA and {col}."
             )
+
+    xgb = load_xgboost_forecasts()
+    has_xgb = False
+    if xgb is not None and not xgb.empty:
+        xgb_sub = xgb[
+            keys + ["actual", "naive", "xgboost", "lower_90", "upper_90", "lower_95", "upper_95"]
+        ].rename(
+            columns={
+                "actual": "actual_xgb",
+                "naive": "naive_xgb",
+            }
+        )
+        # Left-join overlay preserves the core 4-model 745 common origins
+        common = common.merge(xgb_sub, on=keys, how="left")
+        has_xgb = True
+
+        xgb_valid = common["actual_xgb"].notna()
+        if xgb_valid.any():
+            if not np.allclose(
+                common.loc[xgb_valid, "actual_arima"],
+                common.loc[xgb_valid, "actual_xgb"],
+                rtol=1e-10,
+                atol=1e-12,
+                equal_nan=True,
+            ):
+                raise ValueError(
+                    "Actual values are inconsistent between ARIMA and actual_xgb."
+                )
+            if not np.allclose(
+                common.loc[xgb_valid, "naive_arima"],
+                common.loc[xgb_valid, "naive_xgb"],
+                rtol=1e-10,
+                atol=1e-12,
+                equal_nan=True,
+            ):
+                raise ValueError(
+                    "Naïve forecasts are inconsistent between ARIMA and naive_xgb."
+                )
 
     common["actual"] = common["actual_arima"]
     common["naive"] = common["naive_arima"]
@@ -275,22 +294,20 @@ def build_common_sample_metrics() -> pd.DataFrame:
         horizon_df = df[df["horizon"] == horizon]
 
         for model_name, forecast_col in model_columns.items():
-            errors = (
-                horizon_df["actual"]
-                - horizon_df[forecast_col]
-            )
+            valid_m = horizon_df.dropna(subset=["actual", forecast_col])
+            errors = valid_m["actual"] - valid_m[forecast_col]
 
             rows.append(
                 {
                     "model": model_name,
                     "horizon": int(horizon),
-                    "n_forecasts": len(horizon_df),
+                    "n_forecasts": len(valid_m),
                     "rmse": float(
                         np.sqrt(np.mean(errors ** 2))
-                    ),
+                    ) if len(errors) > 0 else 0.0,
                     "mae": float(
                         np.mean(np.abs(errors))
-                    ),
+                    ) if len(errors) > 0 else 0.0,
                 }
             )
 
@@ -450,4 +467,4 @@ def load_xgboost_prediction_intervals() -> pd.DataFrame | None:
     path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    return pd.read_csv(path)

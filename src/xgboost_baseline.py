@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import shap
 
-# Ensure project root is in sys.path
+# Ensure src directory is in sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
 if str(CURRENT_DIR) not in sys.path:
@@ -61,6 +61,8 @@ except ImportError:
     HAS_XGBOOST = False
     from sklearn.ensemble import GradientBoostingRegressor
 
+_CACHED_GOLD_DF: pd.DataFrame | None = None
+
 
 # ---------------------------------------------------------------------------
 # 1. Data loading
@@ -70,12 +72,23 @@ def load_common_sample(
     boc_path: Path | None = None,
     fred_path: Path | None = None,
     cpi_path: Path | None = None,
+    force_reload: bool = False,
 ) -> pd.DataFrame:
     """
     Load the canonical Gold-layer feature dataset and slice to the common sample.
-    Mirrors lstm_baseline.load_common_sample() so both modules produce directly
-    comparable evaluation windows.
+    Caches the result in memory so repeated calls in model comparison / diagnostics
+    do not re-execute the feature engineering pipeline from disk.
     """
+    global _CACHED_GOLD_DF
+    if (
+        _CACHED_GOLD_DF is not None
+        and not force_reload
+        and boc_path is None
+        and fred_path is None
+        and cpi_path is None
+    ):
+        return _CACHED_GOLD_DF.copy()
+
     df = build_gold_features(
         boc_path=boc_path,
         fred_path=fred_path,
@@ -90,6 +103,7 @@ def load_common_sample(
         .sort_values("date")
         .reset_index(drop=True)
     )
+    _CACHED_GOLD_DF = df.copy()
     return df
 
 
@@ -331,17 +345,26 @@ def run_rolling_cv(
     forecast_records: list[dict] = []
 
     for fold_id, (train_end, test_end) in enumerate(folds):
-        train_data = data.iloc[:train_end]
         test_data = data.iloc[train_end:test_end]
-
-        X_train = train_data[feature_cols].values
         X_test = test_data[feature_cols].values
 
         for h in horizons:
             t_col = target_cols[h]
+
+            # 1. Causal h-step embargo:
+            # Slicing at train_end - h guarantees that target Delta_h y_t (which spans t+1..t+h)
+            # contains no realized returns from test_data (which starts at train_end).
+            embargo_end = train_end - h
+            if embargo_end <= 0:
+                raise ValueError(
+                    f"Insufficient samples for train_end={train_end} and embargo h={h}"
+                )
+            train_data = data.iloc[:embargo_end]
+
+            X_train = train_data[feature_cols].values
             y_train = train_data[t_col].values
 
-            # --- Point prediction model ---
+            # --- Full point prediction model fit on all pre-embargo training data ---
             model_point = create_model(
                 loss="squared_error",
                 max_depth=max_depth,
@@ -355,38 +378,47 @@ def run_rolling_cv(
             model_point.fit(X_train, y_train)
             pred_diff = model_point.predict(X_test)
 
-            # --- Prediction intervals: Approach 1 (Quantile Regressors) or Approach 2 (Conformal Residuals) ---
-            val_residuals = y_train - model_point.predict(X_train)
-            res_90 = np.quantile(np.abs(val_residuals), 0.90)
-            res_95 = np.quantile(np.abs(val_residuals), 0.95)
+            # --- Prediction intervals: Split-conformal residual calibration ---
+            # To avoid in-sample residual optimism, hold out the tail of the training block as a calibration set.
+            # Enforce an h-step gap between the fit set and calibration set to prevent label leakage.
+            cal_ratio = 0.15
+            n_tr = len(train_data)
+            cal_size = max(int(n_tr * cal_ratio), 20)
+            fit_end = n_tr - cal_size - h
 
-            if HAS_XGBOOST:
-                # Approach 1: Native Quantile Loss objective in XGBoost
-                q05 = create_model(loss="quantile", alpha=0.05, max_depth=max_depth,
-                                   learning_rate=learning_rate, n_estimators=n_estimators)
-                q95 = create_model(loss="quantile", alpha=0.95, max_depth=max_depth,
-                                   learning_rate=learning_rate, n_estimators=n_estimators)
-                q025 = create_model(loss="quantile", alpha=0.025, max_depth=max_depth,
-                                    learning_rate=learning_rate, n_estimators=n_estimators)
-                q975 = create_model(loss="quantile", alpha=0.975, max_depth=max_depth,
-                                    learning_rate=learning_rate, n_estimators=n_estimators)
+            if fit_end >= 30:
+                fit_data = train_data.iloc[:fit_end]
+                cal_data = train_data.iloc[fit_end + h:]
 
-                q05.fit(X_train, y_train)
-                q95.fit(X_train, y_train)
-                q025.fit(X_train, y_train)
-                q975.fit(X_train, y_train)
+                model_cal = create_model(
+                    loss="squared_error",
+                    max_depth=max_depth,
+                    learning_rate=learning_rate,
+                    n_estimators=n_estimators,
+                    subsample=subsample,
+                    colsample_bytree=colsample_bytree,
+                    reg_lambda=reg_lambda,
+                    reg_alpha=reg_alpha,
+                )
+                model_cal.fit(fit_data[feature_cols].values, fit_data[t_col].values)
+                cal_preds = model_cal.predict(cal_data[feature_cols].values)
+                cal_residuals = np.abs(cal_data[t_col].values - cal_preds)
 
-                lower_90_diff = np.minimum(q05.predict(X_test), pred_diff - res_90)
-                upper_90_diff = np.maximum(q95.predict(X_test), pred_diff + res_90)
-                lower_95_diff = np.minimum(q025.predict(X_test), pred_diff - res_95)
-                upper_95_diff = np.maximum(q975.predict(X_test), pred_diff + res_95)
+                res_90 = float(np.quantile(cal_residuals, 0.90))
+                res_95 = float(np.quantile(cal_residuals, 0.95))
             else:
-                # Approach 2: Conformal / empirical residual quantiles (calibrated, non-crossing)
-                lower_90_diff = pred_diff - res_90
-                upper_90_diff = pred_diff + res_90
-                lower_95_diff = pred_diff - res_95
-                upper_95_diff = pred_diff + res_95
+                # Fallback for small fixtures in unit tests
+                residuals = np.abs(y_train - model_point.predict(X_train))
+                res_90 = float(np.quantile(residuals, 0.90))
+                res_95 = float(np.quantile(residuals, 0.95))
 
+            # Strictly enforce non-crossing monotonicity (95% interval >= 90% interval)
+            res_95 = max(res_95, res_90)
+
+            lower_90_diff = pred_diff - res_90
+            upper_90_diff = pred_diff + res_90
+            lower_95_diff = pred_diff - res_95
+            upper_95_diff = pred_diff + res_95
 
             # Reconstruct levels: y_hat_{t+h} = y_t + Delta_hat
             current_levels = test_data[LEVEL_TARGET].values

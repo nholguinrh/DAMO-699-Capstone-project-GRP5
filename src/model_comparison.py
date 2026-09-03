@@ -592,28 +592,26 @@ def run_clark_west_battery(
     primary_models = [
         ("arima_aic", "ARIMA-AIC", "core"),
         ("var_aic", "VAR-AIC", "core"),
-        ("vecm", "VECM", "vecm"),
-        ("lstm", "LSTM", "lstm"),
+        ("vecm", "VECM (6-var)", "vecm"),
+        ("lstm", "LSTM (Tuned)", "lstm"),
     ]
-
-    # Issue #101: Include XGBoost if forecasts have been generated
-    xgb_raw = load_xgboost(d_min, d_max)
-    m_xgb = None
-    if not xgb_raw.empty:
-        try:
-            m_xgb = merge_cross_pipeline(
-                core, "arima_aic", core_calendar(),
-                xgb_raw, "xgboost", xgboost_calendar(),
-            )
-            primary_models.append(("xgboost", "XGBoost", "xgboost"))
-        except Exception:
-            logger.warning("XGBoost cross-pipeline merge failed; skipping XGBoost in CW battery.")
-
 
     sensitivity_models = [
         ("arima_bic", "ARIMA-BIC", "core"),
         ("var_bic", "VAR-BIC", "core"),
     ]
+
+    # Issue #101: Include XGBoost in the sensitivity battery if forecasts have been generated
+    # Placing it here preserves the primary 12-test battery (m=12) and avoids inflating FDR q-values.
+    xgb_raw = load_xgboost(d_min, d_max)
+    m_xgb = None
+    if not xgb_raw.empty:
+        m_xgb = merge_cross_pipeline(
+            core, "arima_aic", core_calendar(),
+            xgb_raw, "xgboost", xgboost_calendar(),
+        )
+        sensitivity_models.append(("xgboost", "XGBoost (Experimental)", "xgboost"))
+
 
     def _evaluate_models(model_list: list[tuple[str, str, str]]) -> pd.DataFrame:
         records = []
@@ -739,14 +737,21 @@ def apply_clark_west_fdr(cw_df: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
 # 6. Macroeconomic Monetary Policy Regime Segmentation (Issue #101 / #103)
 # ---------------------------------------------------------------------------
 
+# Macroeconomic monetary policy regimes based on Bank of Canada (BoC) policy rate announcements:
+# - Regime 1: 2023-01-01 to 2023-12-31 (Aggressive Tightening & Yield Curve Inversion; BoC peak 5.00% reached July 2023)
+# - Regime 2: 2024-01-01 to 2024-05-31 (Policy Plateau / Higher-for-Longer; BoC paused at 5.00% across Jan-Apr meetings)
+# - Regime 3: 2024-06-01 to 2026-06-30 (Easing Cycle & Un-inversion; first BoC rate cut June 5 2024 to 4.75% through sample end)
 REGIMES = [
     ("Regime 1: Rapid Tightening & Inversion", "2023-01-01", "2023-12-31"),
     ("Regime 2: Policy Plateau / Higher-for-Longer", "2024-01-01", "2024-05-31"),
-    ("Regime 3: Easing Cycle & Un-inversion", "2024-06-01", "2026-12-31"),
+    ("Regime 3: Easing Cycle & Un-inversion", "2024-06-01", "2026-06-30"),
 ]
 
 
-def evaluate_regime_segmentation(output_path: Path | None = None) -> pd.DataFrame:
+def evaluate_regime_segmentation(
+    output_path: Path | None = None,
+    save: bool = True,
+) -> pd.DataFrame:
     """
     Computes out-of-sample forecasting performance (RMSE, MAE, R2_OOS, and Clark-West statistics)
     segmented across the three macroeconomic monetary policy regimes.
@@ -764,22 +769,19 @@ def evaluate_regime_segmentation(output_path: Path | None = None) -> pd.DataFram
     has_xgb = not xgb_df.empty
     m_xgb = None
     if has_xgb:
-        try:
-            m_xgb = merge_cross_pipeline(
-                core, "arima_aic", core_calendar(),
-                xgb_df, "xgboost", xgboost_calendar(),
-            )
-        except Exception:
-            has_xgb = False
+        m_xgb = merge_cross_pipeline(
+            core, "arima_aic", core_calendar(),
+            xgb_df, "xgboost", xgboost_calendar(),
+        )
 
     models_to_eval = [
         ("arima_aic", "ARIMA-AIC", "core"),
         ("var_aic", "VAR-AIC", "core"),
-        ("vecm", "VECM", "vecm"),
-        ("lstm", "LSTM", "lstm"),
+        ("vecm", "VECM (6-var)", "vecm"),
+        ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if has_xgb and m_xgb is not None:
-        models_to_eval.append(("xgboost", "XGBoost", "xgboost"))
+        models_to_eval.append(("xgboost", "XGBoost (Experimental)", "xgboost"))
 
     records = []
     for regime_name, start_date, end_date in REGIMES:
@@ -814,7 +816,27 @@ def evaluate_regime_segmentation(output_path: Path | None = None) -> pd.DataFram
                 rmse_imp = (rmse_naive - rmse_model) / rmse_naive * 100.0 if rmse_naive > 0 else 0.0
                 mae_imp = (mae_naive - mae_model) / mae_naive * 100.0 if mae_naive > 0 else 0.0
 
-                cw_res = clark_west_test(act, naive, pred, h=h)
+                # Statistical inference requires sufficient degrees of freedom under HAC Bartlett kernel (n >= 5*h)
+                min_n_for_inference = 5 * h
+                has_power = len(sub) >= min_n_for_inference
+
+                if has_power:
+                    cw_res = clark_west_test(act, naive, pred, h=h)
+                    r2_oos = cw_res.get("r2_oos")
+                    r2_oos_adj = cw_res.get("r2_oos_adj")
+                    cw_stat = cw_res.get("cw_stat")
+                    cw_p_value = cw_res.get("cw_p_value")
+                    sig_better = cw_res.get("model_significantly_better", False)
+                else:
+                    cw_res = {}
+                    # Calculate descriptive raw R2_OOS without asymptotic significance claim
+                    mspe_n = np.mean((act - naive) ** 2)
+                    mspe_m = np.mean((act - pred) ** 2)
+                    r2_oos = round(float(1.0 - mspe_m / mspe_n), 6) if mspe_n > 0 else 0.0
+                    r2_oos_adj = None
+                    cw_stat = None
+                    cw_p_value = None
+                    sig_better = False
 
                 records.append({
                     "regime": regime_name,
@@ -822,22 +844,24 @@ def evaluate_regime_segmentation(output_path: Path | None = None) -> pd.DataFram
                     "model_key": col_name,
                     "horizon": h,
                     "n_forecasts": len(sub),
+                    "insufficient_sample": not has_power,
                     "rmse_model": round(rmse_model, 5),
                     "rmse_naive": round(rmse_naive, 5),
                     "rmse_improvement_pct": round(rmse_imp, 3),
                     "mae_model": round(mae_model, 5),
                     "mae_naive": round(mae_naive, 5),
                     "mae_improvement_pct": round(mae_imp, 3),
-                    "r2_oos": cw_res.get("r2_oos"),
-                    "r2_oos_adj": cw_res.get("r2_oos_adj"),
-                    "cw_stat": cw_res.get("cw_stat"),
-                    "cw_p_value": cw_res.get("cw_p_value"),
-                    "model_significantly_better": cw_res.get("model_significantly_better", False),
+                    "r2_oos": r2_oos,
+                    "r2_oos_adj": r2_oos_adj,
+                    "cw_stat": cw_stat,
+                    "cw_p_value": cw_p_value,
+                    "model_significantly_better": sig_better,
                 })
 
     regime_df = pd.DataFrame(records)
-    if output_path is not None or OUT_DIR.exists():
+    if save:
         target = output_path if output_path is not None else OUT_DIR / "r3_regime_segmented_metrics.csv"
+        target.parent.mkdir(parents=True, exist_ok=True)
         regime_df.to_csv(target, index=False)
         logger.info("Saved regime segmented metrics to %s", target)
 

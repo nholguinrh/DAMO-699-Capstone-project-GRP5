@@ -268,3 +268,16 @@ class TestSmokePipeline:
 
         q_model = create_model(loss="quantile", alpha=0.05)
         assert hasattr(q_model, "fit")
+
+    def test_real_output_prediction_interval_non_crossing(self):
+        """Verify that committed/generated XGBoost forecast file has strictly non-crossing intervals."""
+        csv_path = PROJECT_ROOT / "outputs" / "r3_xgboost_forecasts.csv"
+        if not csv_path.exists():
+            pytest.skip("r3_xgboost_forecasts.csv not yet generated")
+
+        df = pd.read_csv(csv_path)
+        assert (df["lower_95"] <= df["lower_90"]).all(), "95% lower bound must be <= 90% lower bound"
+        assert (df["lower_90"] <= df["xgboost"]).all(), "90% lower bound must be <= point prediction"
+        assert (df["xgboost"] <= df["upper_90"]).all(), "point prediction must be <= 90% upper bound"
+        assert (df["upper_90"] <= df["upper_95"]).all(), "90% upper bound must be <= 95% upper bound"
+
