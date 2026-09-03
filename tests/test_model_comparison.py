@@ -425,3 +425,22 @@ def test_run_clark_west_battery_smoke():
     assert primary_df["cw_p_adj_global"].notna().all()
     assert primary_df["cw_p_adj_horizon"].notna().all()
 
+
+def test_clark_west_primary_battery_strictly_twelve_hypotheses():
+    """Verify primary battery maintains exactly 4 canonical models x 3 horizons = 12 tests."""
+    primary_df, sensitivity_df = run_clark_west_battery()
+
+    assert len(primary_df) == 12, f"Primary battery must contain exactly 12 hypotheses, got {len(primary_df)}"
+    assert set(primary_df["model"]) == {
+        "ARIMA-AIC",
+        "VAR-AIC",
+        "VECM (6-var)",
+        "LSTM (Tuned)",
+    }
+    # XGBoost must be strictly quarantined to sensitivity_df
+    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
+        assert len(sensitivity_df) == 9
+    else:
+        assert len(sensitivity_df) == 6
+
+

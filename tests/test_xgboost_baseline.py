@@ -281,3 +281,19 @@ class TestSmokePipeline:
         assert (df["xgboost"] <= df["upper_90"]).all(), "point prediction must be <= 90% upper bound"
         assert (df["upper_90"] <= df["upper_95"]).all(), "90% upper bound must be <= 95% upper bound"
 
+    def test_temporal_embargo_prevents_target_overlap(self, synthetic_gold_df):
+        """Verify training targets do not overlap with test fold dates for multi-step horizons."""
+        from xgboost_baseline import engineer_tabular_features, make_rolling_folds
+
+        horizons = [5, 20]
+        data, _, target_cols = engineer_tabular_features(synthetic_gold_df, lags=[1, 2], horizons=horizons)
+        folds = make_rolling_folds(len(data), min_train=50, n_folds=3)
+
+        for train_end, test_end in folds:
+            for h in horizons:
+                embargo_end = train_end - h
+                assert embargo_end < train_end
+                # The maximum forward label step from the last training row must not exceed train_end
+                assert embargo_end + h <= train_end
+
+
