@@ -1,12 +1,17 @@
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+# Make ``project_paths`` importable whether the dashboard is launched as
+# ``streamlit run src/dashboard/app.py`` (src/dashboard on sys.path) or via the
+# repo-root ``streamlit_app.py`` shim.
+_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+from project_paths import OUTPUTS_DIR, PROCESSED_DIR, PROJECT_ROOT  # noqa: E402, F401
 
 
 def _read_csv(filename: str) -> pd.DataFrame:

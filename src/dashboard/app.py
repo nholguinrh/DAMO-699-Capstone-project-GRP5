@@ -1,5 +1,21 @@
+import sys
+from datetime import date
+from pathlib import Path
+
+# Run from the project root: put both the repo root (for ``src.*`` imports, e.g.
+# the pipeline runner) and this directory (for ``data_loader`` / ``charts``) on
+# sys.path regardless of how Streamlit was launched.
+_APP_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _APP_DIR.parents[1]
+for _p in (str(_PROJECT_ROOT), str(_APP_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import pandas as pd
 import streamlit as st
+
+from src.pipeline_runner import DATE_END as PIPELINE_END_DEFAULT
+from src.pipeline_runner import read_run_status, run_pipeline
 
 from data_loader import (
     build_common_forecast_dataset,
@@ -109,6 +125,130 @@ uncertainty_interval = st.sidebar.radio(
     help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
 )
 
+
+
+# =========================================================
+# SIDEBAR — DATA PIPELINE TRIGGER (Path A: bronze → silver → gold)
+# =========================================================
+
+st.sidebar.divider()
+st.sidebar.subheader("Data Pipeline")
+
+_status = read_run_status()
+
+if _status is None:
+    st.sidebar.caption("No pipeline run recorded yet.")
+else:
+    _badge = {
+        "success": "🟢",
+        "warning": "🟡",
+        "error": "🔴",
+    }.get(_status.get("status"), "⚪")
+
+    st.sidebar.caption(
+        f"{_badge} Last run {_status.get('end_time', '?')} "
+        f"· mode: {_status.get('mode', '?')}"
+    )
+
+    if any(
+        source.get("mode") == "cached_fallback"
+        for source in _status.get("sources", {}).values()
+    ):
+        st.sidebar.caption(
+            "⚠️ a source used cached fallback on the last run"
+        )
+
+_pipeline_mode = st.sidebar.radio(
+    "Run mode",
+    options=["cache", "live"],
+    format_func=lambda m: (
+        "Cached rebuild (offline)"
+        if m == "cache"
+        else "Live API refresh (needs FRED key)"
+    ),
+    key="pipeline_mode",
+)
+
+_pipeline_end = st.sidebar.date_input(
+    "Ingestion end date",
+    value=date.fromisoformat(PIPELINE_END_DEFAULT),
+    min_value=date(2009, 2, 1),
+    max_value=date.today(),
+    key="pipeline_end_date",
+)
+
+_pipeline_running = st.session_state.get("pipeline_running", False)
+
+if st.sidebar.button(
+    "Rebuild data & features",
+    disabled=_pipeline_running,
+    use_container_width=True,
+):
+    st.session_state["pipeline_running"] = True
+    try:
+        with st.status(
+            "Running Path A pipeline…",
+            expanded=True,
+        ) as _status_box:
+            st.write(
+                f"Mode: **{_pipeline_mode}** · "
+                f"window ends {_pipeline_end.isoformat()}"
+            )
+
+            _report = run_pipeline(
+                mode=_pipeline_mode,
+                end_date=_pipeline_end.isoformat(),
+            )
+
+            for _src in _report["sources"].values():
+                _icon = {
+                    "success": "✅",
+                    "warning": "⚠️",
+                    "failed": "❌",
+                }.get(_src["status"], "•")
+                st.write(
+                    f"{_icon} {_src['name']}: "
+                    f"{_src['status']} ({_src['mode']})"
+                )
+
+            _gold = _report["gold"]
+            if _gold["status"] == "success":
+                st.write(
+                    f"✅ Gold: {_gold['rows']} rows "
+                    f"through {_gold['date_range'][1]}"
+                )
+            else:
+                st.write(
+                    f"❌ Gold: {_gold['status']} — "
+                    f"{_gold.get('error', _gold.get('reason', ''))}"
+                )
+
+            for _warning in _report["warnings"]:
+                st.warning(_warning)
+
+            _status_box.update(
+                label=f"Pipeline finished: {_report['status']}",
+                state=(
+                    "error"
+                    if _report["status"] == "error"
+                    else "complete"
+                ),
+                expanded=_report["status"] == "error",
+            )
+    finally:
+        st.session_state["pipeline_running"] = False
+
+    # No @st.cache_data is used in this app, so the next rerun re-reads every
+    # CSV. clear() is a harmless no-op today and stays correct if caching is
+    # added later.
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.caption(
+    "Runs the Path A pipeline: rebuilds data/processed/*.csv and the Gold "
+    "feature store. Forecast, Clark-West and SHAP/IRF/FEVD outputs are **not** "
+    "re-run and may lag a fresh rebuild."
+)
 
 
 # =========================================================
@@ -316,6 +456,12 @@ Statistics Canada API ──┘           ↓
         "and momentum indicators are strictly backward-looking. For multi-step forecasting ($h > 1$), models "
         "predict cumulative change $\\Delta_h y_t = \\sum_{k=1}^h \\Delta y_{t+k}$ without access to contemporaneous "
         "macroeconomic shocks."
+    )
+
+    st.caption(
+        "The sidebar **Data Pipeline** control re-runs this bronze → silver → "
+        "gold sequence (Path A) on demand. It does not re-run the forecasting "
+        "models or the Clark-West / SHAP / IRF / FEVD outputs."
     )
 
     st.markdown("---")

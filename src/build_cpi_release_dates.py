@@ -349,6 +349,31 @@ def is_mapping_complete(
     return len(missing_months(mapping, target_end)) == 0
 
 
+def latest_mapped_month(csv_path: Path = OUTPUT_PATH) -> datetime | None:
+    """
+    Newest reference month present in the release-date CSV (regardless of the
+    two documented pre-2012 gaps), or ``None`` if the file is missing/empty.
+
+    Used to decide whether an extended ingestion ``end_date`` needs a refresh --
+    a more precise check than ``is_mapping_complete()``, which also reports the
+    permanently-unmappable 2010-04 / 2010-09 months.
+    """
+    if not csv_path.exists():
+        return None
+
+    months: list[datetime] = []
+    with open(csv_path, "r", encoding="utf-8") as f:
+        next(f, None)  # header
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            ref_str = line.split(",")[0]
+            months.append(datetime.strptime(ref_str, "%Y-%m-%d"))
+
+    return max(months) if months else None
+
+
 def build_mapping(
     target_end: str | datetime | None = None,
 ) -> dict[datetime, datetime]:

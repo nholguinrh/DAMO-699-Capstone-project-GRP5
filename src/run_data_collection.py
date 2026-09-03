@@ -2,7 +2,7 @@ import argparse
 import time
 
 from boc_data_ingestion import run as run_boc
-from build_cpi_release_dates import is_mapping_complete, refresh as refresh_cpi_dates
+from build_cpi_release_dates import latest_mapped_month, refresh as refresh_cpi_dates
 from fred_data_ingestion import run as run_fred
 from pipeline_dates import resolve_date_range
 from statcan_data_ingestion import run as run_statcan
@@ -83,7 +83,7 @@ def main():
     overall_start = time.perf_counter()
 
     # Fail fast on a malformed / future / inverted window before doing any work.
-    resolve_date_range(args.start_date, args.end_date)
+    _, _end = resolve_date_range(args.start_date, args.end_date)
 
     print("=" * 70)
     print("M2 DATA COLLECTION PIPELINE")
@@ -95,14 +95,17 @@ def main():
     )
     print("=" * 70)
 
+    _latest_cpi = latest_mapped_month()
+    _cpi_covered = _latest_cpi is not None and _latest_cpi.strftime("%Y-%m") >= _end[:7]
+
     if args.refresh_cpi_dates:
         print("\nRefreshing config/cpi_release_dates.csv from StatCan...")
         refresh_cpi_dates(target_end=args.end_date)
-    elif not is_mapping_complete(target_end=args.end_date):
+    elif not _cpi_covered:
         print(
-            "\nNOTE: config/cpi_release_dates.csv is missing or does not "
-            "cover the requested end date.\n"
-            "Run with --refresh-cpi-dates to rebuild it, or run "
+            "\nNOTE: config/cpi_release_dates.csv does not reach the requested "
+            f"end date ({_end}).\n"
+            "Run with --refresh-cpi-dates to extend it, or run "
             "build_cpi_release_dates.py directly. Continuing with the "
             "existing file for now (StatCan ingestion will fail if it "
             "encounters an unmapped reference month)."

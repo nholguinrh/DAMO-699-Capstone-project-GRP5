@@ -68,13 +68,11 @@ from dieboldmariano import (
 from statsmodels.stats.multitest import multipletests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project_paths import PROJECT_ROOT  # noqa: E402
+from project_paths import OUTPUTS_DIR as OUT_DIR  # noqa: E402
 
 ALPHA = 0.05
 HORIZONS = [1, 5, 20]
 ACTUAL_TOL = 1e-9  # float tolerance for the actual-value sanity check, not the alignment check
-
-OUT_DIR = PROJECT_ROOT / "outputs"
 
 _DM_EXCEPTIONS = (InvalidParameterException, ZeroVarianceException, NegativeVarianceException)
 _RESERVED_COLS = {"origin_date", "horizon", "actual", "naive", "target_date"}

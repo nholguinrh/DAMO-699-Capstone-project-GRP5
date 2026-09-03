@@ -47,7 +47,9 @@ PROJECT_ROOT = find_project_root()
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 CACHE_DIR = PROJECT_ROOT / "cache"
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
