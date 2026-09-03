@@ -401,14 +401,19 @@ def test_run_clark_west_battery_smoke():
     """
     primary_df, sensitivity_df = run_clark_west_battery()
 
-    # 4 models x 3 horizons = 12 rows
+    # Primary battery is strictly 4 models x 3 horizons = 12 rows (m=12) with canonical names
     assert len(primary_df) == 12
     assert set(primary_df["horizon"]) == {1, 5, 20}
     assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
 
-    # 2 BIC models x 3 horizons = 6 rows
-    assert len(sensitivity_df) == 6
-    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
+    # Sensitivity battery contains 2 BIC models (6 rows) or 3 models (9 rows with XGBoost Experimental)
+    expected_sens = {"ARIMA-BIC", "VAR-BIC"}
+    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
+        expected_sens.add("XGBoost (Experimental)")
+        assert len(sensitivity_df) == 9
+    else:
+        assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == expected_sens
 
     # All forecasts should have ~745 to 750 sample size
     assert (primary_df["n_forecasts"] >= 745).all()

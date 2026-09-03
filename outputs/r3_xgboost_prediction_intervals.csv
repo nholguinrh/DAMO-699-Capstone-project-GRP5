@@ -1,0 +1,4 @@
+horizon,target_nominal_90,empirical_coverage_90,mean_interval_width_90,target_nominal_95,empirical_coverage_95,mean_interval_width_95
+1,90.0,86.97,0.0882,95.0,91.07,0.1076
+5,90.0,86.57,0.199,95.0,92.28,0.2411
+20,90.0,84.22,0.374,95.0,92.64,0.4793
