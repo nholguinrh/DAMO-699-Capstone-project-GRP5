@@ -564,11 +564,11 @@ def run_clark_west_battery(
     """
     Executes the full Clark-West test battery against the Naïve benchmark (Issue #88).
 
-    Primary battery:
-        5 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM, XGBoost) x 3 horizons (1, 5, 20)
-        XGBoost included only if outputs/r3_xgboost_forecasts.csv exists (Issue #101).
+    Primary 12-test battery (m=12):
+        4 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM) x 3 horizons (1, 5, 20)
+        FDR multiplicity control is strictly invariant to experimental benchmarks.
     Sensitivity battery:
-        2 BIC variants (ARIMA-BIC, VAR-BIC) x 3 horizons (1, 5, 20)
+        2 BIC variants (ARIMA-BIC, VAR-BIC) + XGBoost (Experimental) x 3 horizons (1, 5, 20)
 
     Returns:
         (primary_df, sensitivity_df)

@@ -294,54 +294,40 @@ def build_common_sample_metrics() -> pd.DataFrame:
         horizon_df = df[df["horizon"] == horizon]
 
         for model_name, forecast_col in model_columns.items():
-            valid_m = horizon_df.dropna(subset=["actual", forecast_col])
+            # Enforce strict paired evaluation: compute both model and naive errors on identical non-null origins
+            valid_m = horizon_df.dropna(subset=["actual", "naive", forecast_col])
             errors = valid_m["actual"] - valid_m[forecast_col]
+            naive_errors = valid_m["actual"] - valid_m["naive"]
+
+            model_rmse = float(np.sqrt(np.mean(errors ** 2))) if len(errors) > 0 else 0.0
+            model_mae = float(np.mean(np.abs(errors))) if len(errors) > 0 else 0.0
+            paired_naive_rmse = float(np.sqrt(np.mean(naive_errors ** 2))) if len(naive_errors) > 0 else 0.0
+            paired_naive_mae = float(np.mean(np.abs(naive_errors))) if len(naive_errors) > 0 else 0.0
+
+            rmse_imp = (
+                ((paired_naive_rmse - model_rmse) / paired_naive_rmse * 100.0)
+                if paired_naive_rmse > 0 else 0.0
+            )
+            mae_imp = (
+                ((paired_naive_mae - model_mae) / paired_naive_mae * 100.0)
+                if paired_naive_mae > 0 else 0.0
+            )
 
             rows.append(
                 {
                     "model": model_name,
                     "horizon": int(horizon),
                     "n_forecasts": len(valid_m),
-                    "rmse": float(
-                        np.sqrt(np.mean(errors ** 2))
-                    ) if len(errors) > 0 else 0.0,
-                    "mae": float(
-                        np.mean(np.abs(errors))
-                    ) if len(errors) > 0 else 0.0,
+                    "rmse": model_rmse,
+                    "mae": model_mae,
+                    "naive_rmse": paired_naive_rmse,
+                    "naive_mae": paired_naive_mae,
+                    "rmse_improvement_pct": rmse_imp,
+                    "mae_improvement_pct": mae_imp,
                 }
             )
 
     metrics = pd.DataFrame(rows)
-
-    naive = (
-        metrics[
-            metrics["model"] == "Naïve Random Walk"
-        ][["horizon", "rmse", "mae"]]
-        .rename(
-            columns={
-                "rmse": "naive_rmse",
-                "mae": "naive_mae",
-            }
-        )
-    )
-
-    metrics = metrics.merge(
-        naive,
-        on="horizon",
-        how="left",
-    )
-
-    metrics["rmse_improvement_pct"] = (
-        (metrics["naive_rmse"] - metrics["rmse"])
-        / metrics["naive_rmse"]
-        * 100
-    )
-
-    metrics["mae_improvement_pct"] = (
-        (metrics["naive_mae"] - metrics["mae"])
-        / metrics["naive_mae"]
-        * 100
-    )
 
     return (
         metrics

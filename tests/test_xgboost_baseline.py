@@ -296,4 +296,18 @@ class TestSmokePipeline:
                 # The maximum forward label step from the last training row must not exceed train_end
                 assert embargo_end + h <= train_end
 
+    def test_real_output_shap_values_schema_and_density(self):
+        """Assert committed SHAP values artifact is dense without NaN column sprawl."""
+        shap_path = PROJECT_ROOT / "outputs" / "r3_xgboost_shap_values.csv"
+        if not shap_path.exists():
+            pytest.skip("r3_xgboost_shap_values.csv not yet generated")
+
+        df = pd.read_csv(shap_path)
+        assert "horizon" in df.columns, "SHAP values must include 'horizon' column in tidy format"
+        assert "date" in df.columns, "SHAP values must include 'date' column"
+        # In tidy long format, feature columns should contain zero NaNs
+        feature_cols = [c for c in df.columns if c not in ["date", "horizon"]]
+        assert df[feature_cols].isna().sum().sum() == 0, "Tidy SHAP matrix must not contain NaN values"
+
+
 

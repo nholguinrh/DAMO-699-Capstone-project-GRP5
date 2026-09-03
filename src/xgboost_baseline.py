@@ -404,8 +404,11 @@ def run_rolling_cv(
                 cal_preds = model_cal.predict(cal_data[feature_cols].values)
                 cal_residuals = np.abs(cal_data[t_col].values - cal_preds)
 
-                res_90 = float(np.quantile(cal_residuals, 0.90))
-                res_95 = float(np.quantile(cal_residuals, 0.95))
+                n_cal = len(cal_residuals)
+                q90_level = min(1.0, np.ceil((n_cal + 1) * 0.90) / n_cal)
+                q95_level = min(1.0, np.ceil((n_cal + 1) * 0.95) / n_cal)
+                res_90 = float(np.quantile(cal_residuals, q90_level))
+                res_95 = float(np.quantile(cal_residuals, q95_level))
             else:
                 # Fallback for small fixtures in unit tests
                 residuals = np.abs(y_train - model_point.predict(X_train))
@@ -430,21 +433,21 @@ def run_rolling_cv(
             lower_95_lev = current_levels + lower_95_diff
             upper_95_lev = current_levels + upper_95_diff
 
-            for i in range(len(test_data)):
-                forecast_records.append({
-                    "origin_date": str(test_data["date"].iloc[i])[:10],
-                    "horizon": h,
-                    "actual": float(actual_future[i]),
-                    "naive": float(current_levels[i]),
-                    "xgboost": float(pred_level[i]),
-                    "fold": fold_id,
-                    "lower_90": float(lower_90_lev[i]),
-                    "upper_90": float(upper_90_lev[i]),
-                    "lower_95": float(lower_95_lev[i]),
-                    "upper_95": float(upper_95_lev[i]),
-                })
+            fold_df = pd.DataFrame({
+                "origin_date": pd.to_datetime(test_data["date"].values).strftime("%Y-%m-%d"),
+                "horizon": h,
+                "actual": actual_future.astype(float),
+                "naive": current_levels.astype(float),
+                "xgboost": pred_level.astype(float),
+                "fold": fold_id,
+                "lower_90": lower_90_lev.astype(float),
+                "upper_90": upper_90_lev.astype(float),
+                "lower_95": lower_95_lev.astype(float),
+                "upper_95": upper_95_lev.astype(float),
+            })
+            forecast_records.append(fold_df)
 
-    forecasts_df = pd.DataFrame(forecast_records)
+    forecasts_df = pd.concat(forecast_records, ignore_index=True)
     forecasts_df["origin_date"] = pd.to_datetime(forecasts_df["origin_date"])
     forecasts_df = forecasts_df.sort_values(
         ["origin_date", "horizon"]
@@ -565,9 +568,8 @@ def compute_tree_shap_interpretability(
                 "mean_abs_shap": round(float(imp), 6),
             })
 
-        val_df = pd.DataFrame(
-            vals, columns=[f"{col}_h{h}" for col in feature_cols]
-        )
+        # Preserve standard feature column names to maintain a dense, tidy (long) schema
+        val_df = pd.DataFrame(vals, columns=feature_cols)
         val_df["date"] = data["date"].values
         val_df["horizon"] = h
         shap_val_dfs.append(val_df)

@@ -233,10 +233,13 @@ def create_forecast_error_distribution(
     fig = go.Figure()
 
     for model_name, column in MODEL_COLUMNS.items():
-        errors = (
-            plot_df["actual"]
-            - plot_df[column]
-        )
+        if column not in plot_df.columns:
+            continue
+
+        valid = plot_df.dropna(subset=["actual", column])
+        errors = valid["actual"] - valid[column]
+        if len(errors) == 0:
+            continue
 
         if chart_type == "Violin":
             fig.add_trace(
