@@ -1,4 +1,12 @@
+import importlib
+import pandas as pd
 import streamlit as st
+
+import data_loader
+import charts
+
+importlib.reload(data_loader)
+importlib.reload(charts)
 
 from data_loader import (
     build_common_forecast_dataset,
@@ -10,7 +18,9 @@ from data_loader import (
     load_fevd_results,
     load_gold_features,
     load_irf_results,
+    load_regime_metrics,
     load_shap_summary,
+    load_xgboost_shap_summary,
 )
 
 from charts import (
@@ -22,8 +32,11 @@ from charts import (
     create_gold_target_chart,
     create_irf_chart,
     create_metric_comparison_chart,
+    create_regime_comparison_chart,
     create_shap_summary_chart,
 )
+
+
 
 
 # =========================================================
@@ -60,6 +73,8 @@ metrics_df = build_common_sample_metrics()
 
 cw_all = None
 shap_summary_df = load_shap_summary()
+xgb_shap_summary_df = load_xgboost_shap_summary()
+regime_metrics_df = load_regime_metrics()
 irf_df = load_irf_results()
 fevd_df = load_fevd_results()
 gold_df = load_gold_features()
@@ -90,8 +105,17 @@ selected_models = st.sidebar.multiselect(
         "VAR",
         "VECM",
         "LSTM",
+        "XGBoost",
     ],
 )
+
+uncertainty_interval = st.sidebar.radio(
+    "XGBoost Uncertainty Ribbon",
+    options=["None", "90%", "95%"],
+    horizontal=True,
+    help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
+)
+
 
 
 # =========================================================
@@ -160,102 +184,226 @@ with tab_data:
 
     st.markdown(
         """
-        The project integrates three institutional public-data
-        sources into a reproducible analytics workflow.
+        The project integrates **three institutional public-data sources** into an end-to-end,
+        reproducible **Medallion Architecture** (Bronze $\\rightarrow$ Silver $\\rightarrow$ Gold)
+        designed to benchmark econometric and machine learning yield curve forecasting models.
         """
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.metric(
             "Institutional Sources",
             pipeline_metadata["data_sources"],
+            help="Bank of Canada Valet, Federal Reserve FRED, and Statistics Canada WDS",
         )
 
     with col2:
         st.metric(
             "Candidate Models",
             pipeline_metadata["candidate_models"],
+            help="Naïve Random Walk, ARIMA, VAR, VECM, LSTM, and XGBoost",
         )
 
     with col3:
         st.metric(
             "Forecast Horizons",
             pipeline_metadata["forecast_horizons"],
+            help="1-day, 5-day (weekly), and 20-day (monthly) cumulative forward trading horizons",
         )
 
     with col4:
         st.metric(
-            "Common Origins / Horizon",
-            pipeline_metadata[
-                "common_origins_per_horizon"
-            ],
+            "Common Origins",
+            pipeline_metadata["common_origins_per_horizon"],
+            help="Strictly synchronized out-of-sample forecast origin dates per horizon across all models",
         )
 
-    st.subheader("Data Sources")
+    with col5:
+        st.metric(
+            "Total Evaluations",
+            pipeline_metadata.get("total_evaluations", 2235),
+            help="745 common origin dates × 3 horizons evaluated simultaneously",
+        )
 
-    st.markdown(
-        """
-        **Bank of Canada Valet API**
-        - Government of Canada yields
-        - Overnight policy rate
-        - USD/CAD exchange rate
+    st.markdown("---")
 
-        **Federal Reserve FRED API**
-        - U.S. Treasury 10-Year Yield
-        - Federal Funds Effective Rate
+    # --- Section: Data Sources & Medallion Architecture ---
+    st.subheader("Institutional Data Sources & Medallion Architecture")
 
-        **Statistics Canada Web Data Service**
-        - Consumer Price Index
-        - Publication-date aligned CPI YoY
-        """
-    )
+    src_col1, src_col2, src_col3 = st.columns(3)
 
-    st.subheader("Project Pipeline")
+    with src_col1:
+        st.markdown(
+            """
+            #### 🇨🇦 Bank of Canada (Valet API)
+            - **GoC 10Y Benchmark Yield** (`BD.GOC.10Y.M`)
+            - **GoC 2Y Benchmark Yield** (`BD.GOC.2Y.M`)
+            - **Target Yield Spread** ($y_t = \\text{10Y} - \\text{2Y}$)
+            - **Target First Difference** ($\\Delta y_t$)
+            - **BoC Policy Overnight Rate** (`d_overnight_rate`)
+            - **USD/CAD Spot Exchange Rate** (`d_usdcad`)
+            """
+        )
+
+    with src_col2:
+        st.markdown(
+            """
+            #### 🇺🇸 Federal Reserve (FRED API)
+            - **U.S. 10Y Treasury Constant Maturity Yield** (`d_us_treasury_10y`)
+            - **Effective Federal Funds Rate** (`d_fed_funds_rate`)
+            - Captures cross-border term premium transmission, capital mobility, and bilateral monetary policy divergence.
+            """
+        )
+
+    with src_col3:
+        st.markdown(
+            """
+            #### Statistics Canada (WDS API)
+            - **Consumer Price Index (CPI)** All-items monthly index (`d_cpi_yoy`)
+            - Aligned by **official publication release dates** (rather than reference month) to ensure strict point-in-time realism with **zero look-ahead bias**.
+            """
+        )
+
+    with st.expander("📂 Medallion Pipeline Architecture (Bronze → Silver → Gold)", expanded=False):
+        st.markdown(
+            """
+            | Layer | Storage Format | Operations & Processing Logic | Key Artifacts |
+            | :--- | :--- | :--- | :--- |
+            | **Bronze** | Raw JSON / CSV | Immutable ingestion directly from institutional APIs. Raw response payloads preserved with date/source timestamps. | `data/raw/` |
+            | **Silver** | Cleaned CSV | Business day calendar harmonization, non-synchronous holiday alignment via forward-fill, CPI release lag alignment, unit root / stationarity tests (ADF & KPSS). | `data/processed/` |
+            | **Gold** | Standardized CSV | Analytical feature store: 6 stationary core series, 7 causal lag orders ($t-1, \\dots, t-20$), rolling volatility & momentum metrics, multi-horizon cumulative change targets ($\\Delta_h y_t$), cointegration level targets. | `data/processed/` |
+            """
+        )
+
+    st.markdown("---")
+
+    # --- Section: End-to-End Pipeline Diagram ---
+    st.subheader("End-to-End Analytics & Modelling Flow")
 
     st.code(
         """
 Bank of Canada API ─────┐
-FRED API ───────────────┼──> BRONZE
-Statistics Canada API ──┘
-                              ↓
-                           SILVER
-                              ↓
-                    EDA & DIAGNOSTICS
-                              ↓
-               FEATURE ENGINEERING / SELECTION
-                              ↓
-                            GOLD
-                              ↓
-         Naïve | ARIMA | VAR/VECM | LSTM
-                              ↓
-                RMSE / MAE + Clark-West
-                              ↓
-                  EXECUTIVE DASHBOARD
+FRED API ───────────────┼──> [BRONZE LAYER] (Raw API Feeds)
+Statistics Canada API ──┘           ↓
+                                 [SILVER LAYER] (Calendar Harmonization & Point-in-Time CPI Alignment)
+                                    ↓
+                          [EDA & DIAGNOSTICS] (ADF/KPSS Stationarity, Johansen Cointegration, Cross-Correlation)
+                                    ↓
+                       [FEATURE ENGINEERING] (Causal Lags t-1..t-20, Rolling Volatility, Momentum)
+                                    ↓
+                                 [GOLD LAYER] (Canonical Analytical Feature Matrix)
+                                    ↓
+          ┌─────────────────────────┴─────────────────────────┐
+          │                                                   │
+  [Econometric Baselines]                               [Machine Learning]
+  • Naïve Random Walk (Driftless)                       • LSTM Recurrent Neural Network
+  • ARIMA(p,d,q) (Univariate AIC)                       • XGBoost Gradient Boosted Decision Trees
+  • VAR(p) (Multivariate AIC)
+  • VECM(p, r=1) (Cointegrated System)
+          │                                                   │
+          └─────────────────────────┬─────────────────────────┘
+                                    ↓
+                      [EVALUATION & BENCHMARKING]
+                      • 5-Fold Expanding-Window Cross-Validation
+                      • Multi-Horizon Cumulative Targets (h = 1, 5, 20 Days)
+                      • Common Origin Alignment (745 Synchronized Dates)
+                      • Out-of-Sample RMSE, MAE, R²oos, and R²oos,adj
+                      • Clark-West (2007) Tests + Benjamini-Hochberg FDR Control
+                      • Calibrated Conformal / Quantile Prediction Intervals
+                                    ↓
+                      [EXECUTIVE STREAMLIT DASHBOARD]
         """,
         language="text",
     )
 
     st.info(
-        "In this project, exploratory analysis and diagnostics "
-        "were performed using the cleaned Silver-layer data. "
-        "Those findings informed the transformations and features "
-        "retained in the canonical Gold-layer modelling dataset."
+        "💡 **Data Leakage Prevention Guarantee**: All lag features ($t-1$ to $t-20$), rolling volatilities, "
+        "and momentum indicators are strictly backward-looking. For multi-step forecasting ($h > 1$), models "
+        "predict cumulative change $\\Delta_h y_t = \\sum_{k=1}^h \\Delta y_{t+k}$ without access to contemporaneous "
+        "macroeconomic shocks."
     )
 
-    st.subheader("Evaluation Coverage")
+    st.markdown("---")
 
-    st.write(
-        f"""
-        **Target:** {pipeline_metadata['target']}
+    # --- Section: Candidate Models Matrix ---
+    st.subheader("Candidate Forecasting Models Matrix")
 
-        **Common forecast comparison period:**  
-        {pipeline_metadata['common_start_date'].date()}
-        to
-        {pipeline_metadata['common_end_date'].date()}
-        """
-    )
+    models_table = pd.DataFrame([
+        {
+            "Model": "Naïve Random Walk",
+            "Family": "Baseline Benchmark",
+            "Target Formulation": "Level: y_hat_{t+h} = y_t",
+            "Information Set": "Target history y_t",
+            "Key Mechanism / Specification": "Driftless random walk benchmark; baseline for all relative gain metrics",
+        },
+        {
+            "Model": "ARIMA(p,d,q)",
+            "Family": "Linear Econometric",
+            "Target Formulation": "Differences: Delta y_hat_{t+h}",
+            "Information Set": "Univariate target lags",
+            "Key Mechanism / Specification": "Auto-selected (p, d, q) minimizing AIC; single-series autoregressive moving-average",
+        },
+        {
+            "Model": "VAR(p)",
+            "Family": "Multivariate Econometric",
+            "Target Formulation": "Differences: Delta y_hat_{t+h}",
+            "Information Set": "6 stationary macro series",
+            "Key Mechanism / Specification": "Multivariate vector autoregression; AIC-selected lag order with cross-variable transmission",
+        },
+        {
+            "Model": "VECM(p)",
+            "Family": "Cointegrated Econometric",
+            "Target Formulation": "Levels & Differences",
+            "Information Set": "6 non-stationary series (I(1))",
+            "Key Mechanism / Specification": "Johansen cointegrating rank r=1; models long-run equilibrium + short-run error correction",
+        },
+        {
+            "Model": "LSTM",
+            "Family": "Deep Learning / RNN",
+            "Target Formulation": "Cumulative Diff Delta_h y",
+            "Information Set": "20-day sequence × 6 features",
+            "Key Mechanism / Specification": "32 hidden units, AdamW optimizer, early stopping, sequence temporal memory",
+        },
+        {
+            "Model": "XGBoost",
+            "Family": "Tree-Based Machine Learning",
+            "Target Formulation": "Cumulative Diff Delta_h y",
+            "Information Set": "50 causal lag / rolling features",
+            "Key Mechanism / Specification": "Gradient Boosted Trees (150 estimators, depth 3, lr 0.03) + Tree SHAP + Conformal PIs",
+        },
+    ])
+
+    st.dataframe(models_table, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # --- Section: Evaluation Coverage ---
+    st.subheader("Out-of-Sample Evaluation & Common Sample Coverage")
+
+    cov_col1, cov_col2 = st.columns(2)
+
+    with cov_col1:
+        st.markdown(
+            f"""
+            - **Target Variable:** `{pipeline_metadata['target']}`
+            - **Common Evaluation Period:**  
+              `{pipeline_metadata['common_start_date'].date()}` to `{pipeline_metadata['common_end_date'].date()}`
+            - **Common Synchronized Origins:** `{pipeline_metadata['common_origins_per_horizon']} trading dates` per horizon
+            - **Total Synchronized Forecasts:** `{pipeline_metadata.get('total_evaluations', 2235)} evaluations`
+            """
+        )
+
+    with cov_col2:
+        st.markdown(
+            """
+            - **Evaluation Protocol:** 5-fold expanding-window cross-validation
+            - **Evaluation Scale:** Evaluated in yield spread levels (%) against actual realized spreads ($y_{t+h}$)
+            - **Statistical Inference:** Clark-West (2007) test with HAC Bartlett kernel
+            - **Multiple Testing Adjustment:** Benjamini-Hochberg False Discovery Rate (FDR $\le 0.05$)
+            """
+        )
 
 
 # =========================================================
@@ -390,6 +538,7 @@ with tab_performance:
         forecast_df,
         horizon=horizon,
         selected_models=selected_models,
+        uncertainty_interval=uncertainty_interval,
     )
 
     st.plotly_chart(
@@ -399,8 +548,57 @@ with tab_performance:
 
     st.caption(
         "Cross-model comparisons use the 745 forecast origins "
-        "shared simultaneously by ARIMA, VAR, VECM, and LSTM."
+        "shared simultaneously across all baselines and the experimental XGBoost model."
     )
+
+    if regime_metrics_df is not None:
+        st.divider()
+        st.subheader("Macroeconomic Monetary Policy Regime Performance")
+        st.markdown(
+            """
+            Evaluates model resilience across three distinct monetary policy regimes:
+            1. **Regime 1: Rapid Tightening & Inversion** (2023)
+            2. **Regime 2: Policy Plateau / Higher-for-Longer** (Jan–May 2024)
+            3. **Regime 3: Easing Cycle & Un-inversion** (Jun 2024–2026)
+            """
+        )
+
+        regime_fig = create_regime_comparison_chart(
+            regime_metrics_df,
+            horizon=horizon,
+            metric=f"{metric_choice.lower()}_model",
+        )
+        st.plotly_chart(
+            regime_fig,
+            use_container_width=True,
+        )
+
+        reg_sub = regime_metrics_df[regime_metrics_df["horizon"] == horizon][
+            [
+                "regime",
+                "model",
+                "rmse_model",
+                "mae_model",
+                "r2_oos",
+                "cw_stat",
+                "cw_p_value",
+            ]
+        ].copy()
+        reg_sub.columns = [
+            "Regime",
+            "Model",
+            "RMSE",
+            "MAE",
+            "R²_OOS",
+            "CW Stat",
+            "CW p-value",
+        ]
+        st.dataframe(
+            reg_sub,
+            hide_index=True,
+            use_container_width=True,
+        )
+
 
 
 # =========================================================
@@ -520,9 +718,10 @@ with tab_interpretability:
 
     st.header("Model Interpretability")
 
-    shap_tab, irf_tab, fevd_tab = st.tabs(
+    shap_tab, xgb_shap_tab, irf_tab, fevd_tab = st.tabs(
         [
             "LSTM SHAP",
+            "XGBoost SHAP",
             "VAR/VECM IRF",
             "VAR/VECM FEVD",
         ]
@@ -538,7 +737,8 @@ with tab_interpretability:
         )
 
         shap_fig = create_shap_summary_chart(
-            shap_summary_df
+            shap_summary_df,
+            model_name="LSTM",
         )
 
         st.plotly_chart(
@@ -565,6 +765,51 @@ with tab_interpretability:
             "SHAP represents predictive contribution, "
             "not economic causality."
         )
+
+    with xgb_shap_tab:
+
+        st.markdown(
+            """
+            Tree SHAP measures the exact attribution of each lag and rolling volatility
+            feature to the XGBoost gradient boosted tree predictions.
+            """
+        )
+
+        if xgb_shap_summary_df is not None:
+            xgb_sub = xgb_shap_summary_df[
+                xgb_shap_summary_df["horizon"] == horizon
+            ]
+            xgb_shap_fig = create_shap_summary_chart(
+                xgb_sub,
+                model_name=f"XGBoost (h={horizon}d)",
+                top_n=15,
+            )
+
+            st.plotly_chart(
+                xgb_shap_fig,
+                use_container_width=True,
+            )
+
+            top_xgb_feat = (
+                xgb_sub.sort_values(
+                    "mean_abs_shap",
+                    ascending=False,
+                ).iloc[0]
+            )
+
+            st.info(
+                f"Highest XGBoost mean absolute SHAP feature at h={horizon}d: "
+                f"`{top_xgb_feat['feature']}` "
+                f"({top_xgb_feat['mean_abs_shap']:.6f})."
+            )
+
+            st.caption(
+                "Tree SHAP values are computed deterministically "
+                "across the sample space."
+            )
+        else:
+            st.info("XGBoost SHAP summary not available.")
+
 
     with irf_tab:
 
