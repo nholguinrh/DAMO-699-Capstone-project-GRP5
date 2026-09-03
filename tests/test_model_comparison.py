@@ -401,16 +401,10 @@ def test_run_clark_west_battery_smoke():
     """
     primary_df, sensitivity_df = run_clark_west_battery()
 
-    # 4 models (12 rows) or 5 models (15 rows if XGBoost experimental benchmark is present)
-    expected_models = {"ARIMA-AIC", "VAR-AIC", "VECM", "LSTM"}
-    if "XGBoost" in set(primary_df["model"]):
-        expected_models.add("XGBoost")
-        assert len(primary_df) == 15
-    else:
-        assert len(primary_df) == 12
-
+    # 4 models x 3 horizons = 12 rows
+    assert len(primary_df) == 12
     assert set(primary_df["horizon"]) == {1, 5, 20}
-    assert set(primary_df["model"]) == expected_models
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
 
     # 2 BIC models x 3 horizons = 6 rows
     assert len(sensitivity_df) == 6

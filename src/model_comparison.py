@@ -50,11 +50,8 @@ uses (`src/EDA_VAR_AIC _lag _order.py`'s `evaluate()`, `arima_baseline.ipynb`,
 from __future__ import annotations
 
 import importlib.util
-import logging
 import sys
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -143,22 +140,6 @@ def load_lstm(date_min=None, date_max=None) -> pd.DataFrame:
     return df[["origin_date", "horizon", "actual", "naive", "lstm"]]
 
 
-def load_xgboost(date_min=None, date_max=None) -> pd.DataFrame:
-    """
-    Load XGBoost experimental benchmark forecasts (Issue #101).
-    Returns None-like empty frame if the forecast file doesn't exist yet
-    (the xgboost pipeline hasn't been run), so callers can skip gracefully.
-    """
-    path = OUT_DIR / "r3_xgboost_forecasts.csv"
-    if not path.exists():
-        return pd.DataFrame(columns=["origin_date", "horizon", "actual", "naive", "xgboost"])
-    df = pd.read_csv(path, parse_dates=["origin_date"])
-    if date_min is not None:
-        df = df[(df["origin_date"] >= date_min) & (df["origin_date"] <= date_max)]
-    return df[["origin_date", "horizon", "actual", "naive", "xgboost"]]
-
-
-
 # ---------------------------------------------------------------------------
 # 2. Each pipeline's real evaluation calendar (for cross-pipeline alignment)
 # ---------------------------------------------------------------------------
@@ -181,13 +162,6 @@ def vecm_calendar() -> pd.DatetimeIndex:
 def lstm_calendar() -> pd.DatetimeIndex:
     """The exact daily calendar LSTM's rolling-CV evaluates against."""
     from lstm_baseline import load_common_sample
-    return pd.DatetimeIndex(load_common_sample()["date"])
-
-
-def xgboost_calendar() -> pd.DatetimeIndex:
-    """The exact daily calendar XGBoost's rolling-CV evaluates against.
-    Uses the same Gold-layer common sample as LSTM (Issue #101)."""
-    from xgboost_baseline import load_common_sample
     return pd.DatetimeIndex(load_common_sample()["date"])
 
 
@@ -499,8 +473,6 @@ def clark_west_test(
     cw_p_value = float(stats.norm.sf(cw_stat))
 
     model_better = bool(cw_p_value < alpha and cw_stat > 0)
-    r2_oos = float(1.0 - (mspe_2 / mspe_1)) if mspe_1 > 0 else 0.0
-    r2_oos_adj = float(f_bar / mspe_1) if mspe_1 > 0 else 0.0
 
     return {
         "n_forecasts": n_valid,
@@ -508,8 +480,6 @@ def clark_west_test(
         "mspe_model": round(mspe_2, 6),
         "cw_adjustment": round(adj, 6),
         "mspe_model_adj": round(mspe_2_adj, 6),
-        "r2_oos": round(r2_oos, 6),
-        "r2_oos_adj": round(r2_oos_adj, 6),
         "mean_f_stat": round(f_bar, 6),
         "se_f_stat": round(se_f, 6),
         "cw_stat": round(cw_stat, 3),
@@ -518,7 +488,6 @@ def clark_west_test(
         "model_significantly_better": model_better,
         "insufficient_sample": False,
     }
-
 
 
 def plain_language_verdict_cw(row: dict | pd.Series, model_name: str) -> str:
@@ -564,14 +533,13 @@ def run_clark_west_battery(
     """
     Executes the full Clark-West test battery against the Naïve benchmark (Issue #88).
 
-    Primary battery:
-        5 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM, XGBoost) x 3 horizons (1, 5, 20)
-        XGBoost included only if outputs/r3_xgboost_forecasts.csv exists (Issue #101).
+    Primary 12-test battery:
+        4 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM) x 3 horizons (1, 5, 20)
     Sensitivity battery:
         2 BIC variants (ARIMA-BIC, VAR-BIC) x 3 horizons (1, 5, 20)
 
     Returns:
-        (primary_df, sensitivity_df)
+        (primary_12_df, sensitivity_df)
     """
     core = load_core()
     d_min = pd.Timestamp(date_min) if date_min is not None else core["origin_date"].min()
@@ -592,23 +560,9 @@ def run_clark_west_battery(
     primary_models = [
         ("arima_aic", "ARIMA-AIC", "core"),
         ("var_aic", "VAR-AIC", "core"),
-        ("vecm", "VECM", "vecm"),
-        ("lstm", "LSTM", "lstm"),
+        ("vecm", "VECM (6-var)", "vecm"),
+        ("lstm", "LSTM (Tuned)", "lstm"),
     ]
-
-    # Issue #101: Include XGBoost if forecasts have been generated
-    xgb_raw = load_xgboost(d_min, d_max)
-    m_xgb = None
-    if not xgb_raw.empty:
-        try:
-            m_xgb = merge_cross_pipeline(
-                core, "arima_aic", core_calendar(),
-                xgb_raw, "xgboost", xgboost_calendar(),
-            )
-            primary_models.append(("xgboost", "XGBoost", "xgboost"))
-        except Exception:
-            logger.warning("XGBoost cross-pipeline merge failed; skipping XGBoost in CW battery.")
-
 
     sensitivity_models = [
         ("arima_bic", "ARIMA-BIC", "core"),
@@ -631,11 +585,6 @@ def run_clark_west_battery(
                     pred = df_sub[col_name].to_numpy()
                 elif source == "lstm":
                     df_sub = m_lstm[m_lstm["horizon"] == h]
-                    act = df_sub["actual"].to_numpy()
-                    naive = df_sub["naive"].to_numpy()
-                    pred = df_sub[col_name].to_numpy()
-                elif source == "xgboost":
-                    df_sub = m_xgb[m_xgb["horizon"] == h]
                     act = df_sub["actual"].to_numpy()
                     naive = df_sub["naive"].to_numpy()
                     pred = df_sub[col_name].to_numpy()
@@ -733,134 +682,3 @@ def apply_clark_west_fdr(cw_df: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
     )
 
     return out
-
-
-# ---------------------------------------------------------------------------
-# 6. Macroeconomic Monetary Policy Regime Segmentation (Issue #101 / #103)
-# ---------------------------------------------------------------------------
-
-REGIMES = [
-    ("Regime 1: Rapid Tightening & Inversion", "2023-01-01", "2023-12-31"),
-    ("Regime 2: Policy Plateau / Higher-for-Longer", "2024-01-01", "2024-05-31"),
-    ("Regime 3: Easing Cycle & Un-inversion", "2024-06-01", "2026-12-31"),
-]
-
-
-def evaluate_regime_segmentation(output_path: Path | None = None) -> pd.DataFrame:
-    """
-    Computes out-of-sample forecasting performance (RMSE, MAE, R2_OOS, and Clark-West statistics)
-    segmented across the three macroeconomic monetary policy regimes.
-    """
-    core = load_core()
-    vecm = load_vecm()
-    lstm = load_lstm()
-    xgb_df = load_xgboost()
-
-    m_lstm = merge_cross_pipeline(
-        core, "arima_aic", core_calendar(),
-        lstm, "lstm", lstm_calendar(),
-    )
-
-    has_xgb = not xgb_df.empty
-    m_xgb = None
-    if has_xgb:
-        try:
-            m_xgb = merge_cross_pipeline(
-                core, "arima_aic", core_calendar(),
-                xgb_df, "xgboost", xgboost_calendar(),
-            )
-        except Exception:
-            has_xgb = False
-
-    models_to_eval = [
-        ("arima_aic", "ARIMA-AIC", "core"),
-        ("var_aic", "VAR-AIC", "core"),
-        ("vecm", "VECM", "vecm"),
-        ("lstm", "LSTM", "lstm"),
-    ]
-    if has_xgb and m_xgb is not None:
-        models_to_eval.append(("xgboost", "XGBoost", "xgboost"))
-
-    records = []
-    for regime_name, start_date, end_date in REGIMES:
-        s_date = pd.Timestamp(start_date)
-        e_date = pd.Timestamp(end_date)
-
-        for col_name, display_name, source in models_to_eval:
-            for h in HORIZONS:
-                if source == "core":
-                    sub = core[(core["origin_date"] >= s_date) & (core["origin_date"] <= e_date) & (core["horizon"] == h)]
-                elif source == "vecm":
-                    sub = vecm[(vecm["origin_date"] >= s_date) & (vecm["origin_date"] <= e_date) & (vecm["horizon"] == h)]
-                elif source == "lstm":
-                    sub = m_lstm[(m_lstm["origin_date"] >= s_date) & (m_lstm["origin_date"] <= e_date) & (m_lstm["horizon"] == h)]
-                elif source == "xgboost":
-                    sub = m_xgb[(m_xgb["origin_date"] >= s_date) & (m_xgb["origin_date"] <= e_date) & (m_xgb["horizon"] == h)]
-                else:
-                    continue
-
-                if len(sub) < 3:
-                    continue
-
-                act = sub["actual"].to_numpy()
-                naive = sub["naive"].to_numpy()
-                pred = sub[col_name].to_numpy()
-
-                rmse_model = float(np.sqrt(np.mean((act - pred) ** 2)))
-                mae_model = float(np.mean(np.abs(act - pred)))
-                rmse_naive = float(np.sqrt(np.mean((act - naive) ** 2)))
-                mae_naive = float(np.mean(np.abs(act - naive)))
-
-                rmse_imp = (rmse_naive - rmse_model) / rmse_naive * 100.0 if rmse_naive > 0 else 0.0
-                mae_imp = (mae_naive - mae_model) / mae_naive * 100.0 if mae_naive > 0 else 0.0
-
-                cw_res = clark_west_test(act, naive, pred, h=h)
-
-                records.append({
-                    "regime": regime_name,
-                    "model": display_name,
-                    "model_key": col_name,
-                    "horizon": h,
-                    "n_forecasts": len(sub),
-                    "rmse_model": round(rmse_model, 5),
-                    "rmse_naive": round(rmse_naive, 5),
-                    "rmse_improvement_pct": round(rmse_imp, 3),
-                    "mae_model": round(mae_model, 5),
-                    "mae_naive": round(mae_naive, 5),
-                    "mae_improvement_pct": round(mae_imp, 3),
-                    "r2_oos": cw_res.get("r2_oos"),
-                    "r2_oos_adj": cw_res.get("r2_oos_adj"),
-                    "cw_stat": cw_res.get("cw_stat"),
-                    "cw_p_value": cw_res.get("cw_p_value"),
-                    "model_significantly_better": cw_res.get("model_significantly_better", False),
-                })
-
-    regime_df = pd.DataFrame(records)
-    if output_path is not None or OUT_DIR.exists():
-        target = output_path if output_path is not None else OUT_DIR / "r3_regime_segmented_metrics.csv"
-        regime_df.to_csv(target, index=False)
-        logger.info("Saved regime segmented metrics to %s", target)
-
-    return regime_df
-
-
-def export_all_model_comparisons(output_dir: Path | None = None) -> None:
-    """
-    Executes the full econometric comparison battery and exports all canonical result CSVs.
-    """
-    out = output_dir if output_dir is not None else OUT_DIR
-    out.mkdir(parents=True, exist_ok=True)
-
-    primary_df, sensitivity_df = run_clark_west_battery()
-    primary_df.to_csv(out / "clark_west_test_results.csv", index=False)
-    sensitivity_df.to_csv(out / "clark_west_sensitivity_results.csv", index=False)
-    logger.info("Saved Clark-West battery results to %s", out)
-
-    regime_df = evaluate_regime_segmentation(output_path=out / "r3_regime_segmented_metrics.csv")
-    logger.info("Saved Regime Segmentation metrics (%d rows) to %s", len(regime_df), out)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    export_all_model_comparisons()
-

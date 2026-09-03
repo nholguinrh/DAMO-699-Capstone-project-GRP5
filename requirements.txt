@@ -35,6 +35,3 @@ pytest==9.1.1
 
 plotly==7.0.0
 streamlit==1.62.0
-
-# Experimental ML Benchmark (Issue #101)
-xgboost>=2.0.0
