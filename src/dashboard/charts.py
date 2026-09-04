@@ -8,6 +8,7 @@ MODEL_COLUMNS = {
     "VAR": "var_aic",
     "VECM": "vecm",
     "LSTM": "lstm",
+    "XGBoost": "xgboost",
 }
 
 
@@ -19,6 +20,7 @@ def create_forecast_vs_actual_chart(
     df: pd.DataFrame,
     horizon: int,
     selected_models: list[str],
+    uncertainty_interval: str = "None",
 ) -> go.Figure:
 
     plot_df = (
@@ -29,20 +31,50 @@ def create_forecast_vs_actual_chart(
 
     fig = go.Figure()
 
+    # Optional XGBoost Prediction Interval Ribbon
+    if (
+        uncertainty_interval in ["90%", "95%"]
+        and "XGBoost" in selected_models
+    ):
+        l_col = "lower_90" if uncertainty_interval == "90%" else "lower_95"
+        u_col = "upper_90" if uncertainty_interval == "90%" else "upper_95"
+        if l_col in plot_df.columns and u_col in plot_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df["origin_date"],
+                    y=plot_df[u_col],
+                    mode="lines",
+                    line=dict(width=0),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df["origin_date"],
+                    y=plot_df[l_col],
+                    mode="lines",
+                    line=dict(width=0),
+                    fill="tonexty",
+                    fillcolor="rgba(255, 127, 14, 0.20)",
+                    name=f"XGBoost {uncertainty_interval} Band",
+                )
+            )
+
     fig.add_trace(
         go.Scatter(
             x=plot_df["origin_date"],
             y=plot_df["actual"],
             mode="lines",
             name="Actual",
-            line=dict(width=3),
+            line=dict(width=3, color="#1f77b4"),
         )
     )
 
     for model_name in selected_models:
         column = MODEL_COLUMNS.get(model_name)
 
-        if column is None:
+        if column is None or column not in plot_df.columns:
             continue
 
         fig.add_trace(
@@ -63,6 +95,7 @@ def create_forecast_vs_actual_chart(
     )
 
     return fig
+
 
 
 # =========================================================
@@ -200,10 +233,13 @@ def create_forecast_error_distribution(
     fig = go.Figure()
 
     for model_name, column in MODEL_COLUMNS.items():
-        errors = (
-            plot_df["actual"]
-            - plot_df[column]
-        )
+        if column not in plot_df.columns:
+            continue
+
+        valid = plot_df.dropna(subset=["actual", column])
+        errors = valid["actual"] - valid[column]
+        if len(errors) == 0:
+            continue
 
         if chart_type == "Violin":
             fig.add_trace(
@@ -254,16 +290,19 @@ def create_forecast_error_distribution(
 
 def create_shap_summary_chart(
     shap_summary_df: pd.DataFrame,
+    model_name: str = "LSTM",
+    top_n: int = 15,
 ) -> go.Figure:
 
-    plot_df = (
-        shap_summary_df
-        .copy()
-        .sort_values(
-            "mean_abs_shap",
-            ascending=True,
+    plot_df = shap_summary_df.copy()
+    if len(plot_df) > top_n:
+        plot_df = (
+            plot_df.sort_values("mean_abs_shap", ascending=False)
+            .head(top_n)
+            .sort_values("mean_abs_shap", ascending=True)
         )
-    )
+    else:
+        plot_df = plot_df.sort_values("mean_abs_shap", ascending=True)
 
     fig = go.Figure(
         go.Bar(
@@ -278,13 +317,51 @@ def create_shap_summary_chart(
     )
 
     fig.update_layout(
-        title="LSTM Feature Importance — Mean Absolute SHAP",
+        title=f"{model_name} Feature Importance — Mean Absolute SHAP",
         xaxis_title="Mean Absolute SHAP Value",
         yaxis_title="Feature",
         showlegend=False,
     )
 
     return fig
+
+
+# =========================================================
+# REGIME SEGMENTED PERFORMANCE
+# =========================================================
+
+def create_regime_comparison_chart(
+    regime_df: pd.DataFrame,
+    horizon: int = 1,
+    metric: str = "rmse_model",
+) -> go.Figure:
+    sub = regime_df[regime_df["horizon"] == horizon].copy()
+    metric_label = "RMSE" if "rmse" in metric else "MAE"
+
+    fig = go.Figure()
+
+    for model_name in sub["model"].unique():
+        m_df = sub[sub["model"] == model_name]
+        fig.add_trace(
+            go.Bar(
+                x=m_df["regime"],
+                y=m_df[metric],
+                name=model_name,
+                text=m_df[metric].map(lambda x: f"{x:.4f}"),
+                textposition="outside",
+            )
+        )
+
+    fig.update_layout(
+        title=f"Monetary Policy Regime Performance ({metric_label}) — Horizon {horizon}d",
+        xaxis_title="Monetary Policy Regime",
+        yaxis_title=metric_label,
+        barmode="group",
+        legend_title="Model",
+    )
+
+    return fig
+
 
 
 # =========================================================

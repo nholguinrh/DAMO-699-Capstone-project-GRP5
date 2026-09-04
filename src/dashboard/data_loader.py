@@ -48,6 +48,15 @@ def load_lstm_forecasts() -> pd.DataFrame:
     return df
 
 
+def load_xgboost_forecasts() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_forecasts.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df["origin_date"] = pd.to_datetime(df["origin_date"])
+    return df
+
+
 # =========================================================
 # EVALUATION OUTPUTS
 # =========================================================
@@ -72,12 +81,26 @@ def load_lstm_metrics() -> pd.DataFrame:
     return _read_csv("r3_lstm_vs_naive.csv")
 
 
+def load_xgboost_metrics() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_vs_naive.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
 # =========================================================
 # INTERPRETABILITY OUTPUTS
 # =========================================================
 
 def load_shap_summary() -> pd.DataFrame:
     return _read_csv("r3_lstm_shap_summary.csv")
+
+
+def load_xgboost_shap_summary() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "r3_xgboost_shap_summary.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
 
 
 def load_fevd_results() -> pd.DataFrame:
@@ -161,11 +184,8 @@ def build_common_forecast_dataset() -> pd.DataFrame:
         .merge(lstm, on=keys, how="inner")
     )
 
-    for col in [
-        "actual_var",
-        "actual_vecm",
-        "actual_lstm",
-    ]:
+    # Core 4-model parity check (strictly 745 common origins)
+    for col in ["actual_var", "actual_vecm", "actual_lstm"]:
         if not np.allclose(
             common["actual_arima"],
             common[col],
@@ -177,11 +197,7 @@ def build_common_forecast_dataset() -> pd.DataFrame:
                 f"Actual values are inconsistent between ARIMA and {col}."
             )
 
-    for col in [
-        "naive_var",
-        "naive_vecm",
-        "naive_lstm",
-    ]:
+    for col in ["naive_var", "naive_vecm", "naive_lstm"]:
         if not np.allclose(
             common["naive_arima"],
             common[col],
@@ -193,22 +209,62 @@ def build_common_forecast_dataset() -> pd.DataFrame:
                 f"Naïve forecasts are inconsistent between ARIMA and {col}."
             )
 
+    xgb = load_xgboost_forecasts()
+    has_xgb = False
+    if xgb is not None and not xgb.empty:
+        xgb_sub = xgb[
+            keys + ["actual", "naive", "xgboost", "lower_90", "upper_90", "lower_95", "upper_95"]
+        ].rename(
+            columns={
+                "actual": "actual_xgb",
+                "naive": "naive_xgb",
+            }
+        )
+        # Left-join overlay preserves the core 4-model 745 common origins
+        common = common.merge(xgb_sub, on=keys, how="left")
+        has_xgb = True
+
+        xgb_valid = common["actual_xgb"].notna()
+        if xgb_valid.any():
+            if not np.allclose(
+                common.loc[xgb_valid, "actual_arima"],
+                common.loc[xgb_valid, "actual_xgb"],
+                rtol=1e-10,
+                atol=1e-12,
+                equal_nan=True,
+            ):
+                raise ValueError(
+                    "Actual values are inconsistent between ARIMA and actual_xgb."
+                )
+            if not np.allclose(
+                common.loc[xgb_valid, "naive_arima"],
+                common.loc[xgb_valid, "naive_xgb"],
+                rtol=1e-10,
+                atol=1e-12,
+                equal_nan=True,
+            ):
+                raise ValueError(
+                    "Naïve forecasts are inconsistent between ARIMA and naive_xgb."
+                )
+
     common["actual"] = common["actual_arima"]
     common["naive"] = common["naive_arima"]
 
+    out_cols = [
+        "origin_date",
+        "horizon",
+        "actual",
+        "naive",
+        "arima_aic",
+        "var_aic",
+        "vecm",
+        "lstm",
+    ]
+    if has_xgb:
+        out_cols.extend(["xgboost", "lower_90", "upper_90", "lower_95", "upper_95"])
+
     return (
-        common[
-            [
-                "origin_date",
-                "horizon",
-                "actual",
-                "naive",
-                "arima_aic",
-                "var_aic",
-                "vecm",
-                "lstm",
-            ]
-        ]
+        common[out_cols]
         .sort_values(["horizon", "origin_date"])
         .reset_index(drop=True)
     )
@@ -228,6 +284,9 @@ def build_common_sample_metrics() -> pd.DataFrame:
         "VECM": "vecm",
         "LSTM": "lstm",
     }
+    if "xgboost" in df.columns:
+        model_columns["XGBoost"] = "xgboost"
+
 
     rows = []
 
@@ -235,56 +294,40 @@ def build_common_sample_metrics() -> pd.DataFrame:
         horizon_df = df[df["horizon"] == horizon]
 
         for model_name, forecast_col in model_columns.items():
-            errors = (
-                horizon_df["actual"]
-                - horizon_df[forecast_col]
+            # Enforce strict paired evaluation: compute both model and naive errors on identical non-null origins
+            valid_m = horizon_df.dropna(subset=["actual", "naive", forecast_col])
+            errors = valid_m["actual"] - valid_m[forecast_col]
+            naive_errors = valid_m["actual"] - valid_m["naive"]
+
+            model_rmse = float(np.sqrt(np.mean(errors ** 2))) if len(errors) > 0 else 0.0
+            model_mae = float(np.mean(np.abs(errors))) if len(errors) > 0 else 0.0
+            paired_naive_rmse = float(np.sqrt(np.mean(naive_errors ** 2))) if len(naive_errors) > 0 else 0.0
+            paired_naive_mae = float(np.mean(np.abs(naive_errors))) if len(naive_errors) > 0 else 0.0
+
+            rmse_imp = (
+                ((paired_naive_rmse - model_rmse) / paired_naive_rmse * 100.0)
+                if paired_naive_rmse > 0 else 0.0
+            )
+            mae_imp = (
+                ((paired_naive_mae - model_mae) / paired_naive_mae * 100.0)
+                if paired_naive_mae > 0 else 0.0
             )
 
             rows.append(
                 {
                     "model": model_name,
                     "horizon": int(horizon),
-                    "n_forecasts": len(horizon_df),
-                    "rmse": float(
-                        np.sqrt(np.mean(errors ** 2))
-                    ),
-                    "mae": float(
-                        np.mean(np.abs(errors))
-                    ),
+                    "n_forecasts": len(valid_m),
+                    "rmse": model_rmse,
+                    "mae": model_mae,
+                    "naive_rmse": paired_naive_rmse,
+                    "naive_mae": paired_naive_mae,
+                    "rmse_improvement_pct": rmse_imp,
+                    "mae_improvement_pct": mae_imp,
                 }
             )
 
     metrics = pd.DataFrame(rows)
-
-    naive = (
-        metrics[
-            metrics["model"] == "Naïve Random Walk"
-        ][["horizon", "rmse", "mae"]]
-        .rename(
-            columns={
-                "rmse": "naive_rmse",
-                "mae": "naive_mae",
-            }
-        )
-    )
-
-    metrics = metrics.merge(
-        naive,
-        on="horizon",
-        how="left",
-    )
-
-    metrics["rmse_improvement_pct"] = (
-        (metrics["naive_rmse"] - metrics["rmse"])
-        / metrics["naive_rmse"]
-        * 100
-    )
-
-    metrics["mae_improvement_pct"] = (
-        (metrics["naive_mae"] - metrics["mae"])
-        / metrics["naive_mae"]
-        * 100
-    )
 
     return (
         metrics
@@ -313,7 +356,7 @@ def get_pipeline_metadata() -> dict:
 
     return {
         "data_sources": 3,
-        "candidate_models": 4,
+        "candidate_models": "5 (+ Naïve)",
         "forecast_horizons": "1 / 5 / 20 days",
         "common_origins_per_horizon": int(
             common.groupby("horizon").size().min()
@@ -321,6 +364,7 @@ def get_pipeline_metadata() -> dict:
         "common_start_date": common["origin_date"].min(),
         "common_end_date": common["origin_date"].max(),
         "target": "Canadian 10Y–2Y yield spread",
+        "total_evaluations": len(common),
     }
 
 
@@ -390,3 +434,23 @@ def get_eda_findings() -> pd.DataFrame:
     ]
 
     return pd.DataFrame(rows)
+
+
+def load_regime_metrics() -> pd.DataFrame | None:
+    """
+    Loads macroeconomic monetary policy regime segmented metrics (Issue #101).
+    """
+    path = OUTPUTS_DIR / "r3_regime_segmented_metrics.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
+def load_xgboost_prediction_intervals() -> pd.DataFrame | None:
+    """
+    Loads XGBoost empirical coverage and interval width metrics (Issue #101).
+    """
+    path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)

@@ -401,14 +401,19 @@ def test_run_clark_west_battery_smoke():
     """
     primary_df, sensitivity_df = run_clark_west_battery()
 
-    # 4 models x 3 horizons = 12 rows
+    # Primary battery is strictly 4 models x 3 horizons = 12 rows (m=12) with canonical names
     assert len(primary_df) == 12
     assert set(primary_df["horizon"]) == {1, 5, 20}
     assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
 
-    # 2 BIC models x 3 horizons = 6 rows
-    assert len(sensitivity_df) == 6
-    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
+    # Sensitivity battery contains 2 BIC models (6 rows) or 3 models (9 rows with XGBoost Experimental)
+    expected_sens = {"ARIMA-BIC", "VAR-BIC"}
+    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
+        expected_sens.add("XGBoost (Experimental)")
+        assert len(sensitivity_df) == 9
+    else:
+        assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == expected_sens
 
     # All forecasts should have ~745 to 750 sample size
     assert (primary_df["n_forecasts"] >= 745).all()
@@ -419,4 +424,102 @@ def test_run_clark_west_battery_smoke():
     assert primary_df["cw_p_value"].notna().all()
     assert primary_df["cw_p_adj_global"].notna().all()
     assert primary_df["cw_p_adj_horizon"].notna().all()
+
+
+def test_clark_west_primary_battery_strictly_twelve_hypotheses():
+    """Verify primary battery maintains exactly 4 canonical models x 3 horizons = 12 tests."""
+    primary_df, sensitivity_df = run_clark_west_battery()
+
+    assert len(primary_df) == 12, f"Primary battery must contain exactly 12 hypotheses, got {len(primary_df)}"
+    assert set(primary_df["model"]) == {
+        "ARIMA-AIC",
+        "VAR-AIC",
+        "VECM (6-var)",
+        "LSTM (Tuned)",
+    }
+    # XGBoost must be strictly quarantined to sensitivity_df
+    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
+        assert len(sensitivity_df) == 9
+    else:
+        assert len(sensitivity_df) == 6
+
+
+def test_regime_segmentation_hac_power_gating():
+    """Assert Clark-West hypothesis claims are suppressed when sample size fails HAC regularity."""
+    from model_comparison import evaluate_regime_segmentation, REGIMES
+
+    regime_df = evaluate_regime_segmentation(save=False)
+    assert len(regime_df) > 0
+
+    expected_regimes = {r[0] for r in REGIMES}
+    assert set(regime_df["regime"]) == expected_regimes
+
+    # Assert small-sample gating rule: N < 5*h must suppress CW test claims
+    underpowered = regime_df[regime_df["insufficient_sample"]]
+    assert len(underpowered) > 0, "Expected underpowered regimes (e.g. Regime 2 at h=20)"
+
+    for _, row in underpowered.iterrows():
+        assert pd.isna(row["cw_stat"]) or row["cw_stat"] is None
+        assert pd.isna(row["cw_p_value"]) or row["cw_p_value"] is None
+        assert row["model_significantly_better"] is False
+
+
+def test_common_sample_metrics_paired_baseline_parity():
+    """Assert relative improvement metrics are computed over strictly identical observation pairs."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
+    from data_loader import build_common_sample_metrics, build_common_forecast_dataset
+
+    metrics_df = build_common_sample_metrics()
+    forecast_df = build_common_forecast_dataset()
+
+    for _, row in metrics_df.iterrows():
+        model_name = row["model"]
+        horizon = row["horizon"]
+        if model_name == "Naïve Random Walk":
+            continue
+
+        # Map display name to forecast column
+        col_map = {"ARIMA": "arima_aic", "VAR": "var_aic", "VECM": "vecm", "LSTM": "lstm", "XGBoost": "xgboost"}
+        col = col_map.get(model_name)
+        if col is None or col not in forecast_df.columns:
+            continue
+
+        sub = forecast_df[forecast_df["horizon"] == horizon].dropna(subset=["actual", "naive", col])
+        expected_naive_rmse = np.sqrt(np.mean((sub["actual"] - sub["naive"]) ** 2))
+        expected_model_rmse = np.sqrt(np.mean((sub["actual"] - sub[col]) ** 2))
+        expected_imp = (expected_naive_rmse - expected_model_rmse) / expected_naive_rmse * 100.0
+
+        assert np.isclose(row["naive_rmse"], expected_naive_rmse, atol=1e-5), \
+            f"Naive RMSE for {model_name} at h={horizon} must match paired sample"
+        assert np.isclose(row["rmse_improvement_pct"], expected_imp, atol=1e-3), \
+            f"Improvement pct for {model_name} at h={horizon} must match paired calculation"
+
+
+def test_forecast_error_distribution_missing_column_resilience():
+    """Assert error distribution visualization renders without KeyError when optional models are missing."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
+    from charts import create_forecast_error_distribution
+
+    # Synthetic forecast dataframe missing 'xgboost'
+    df = pd.DataFrame({
+        "horizon": [1, 1, 1],
+        "origin_date": pd.date_range("2024-01-01", periods=3),
+        "actual": [1.0, 1.1, 1.2],
+        "naive": [1.0, 1.0, 1.1],
+        "arima_aic": [1.01, 1.09, 1.21],
+        "var_aic": [1.00, 1.11, 1.20],
+        "vecm": [1.02, 1.10, 1.19],
+        "lstm": [1.01, 1.08, 1.22],
+    })
+
+    fig_box = create_forecast_error_distribution(df, horizon=1, chart_type="Box")
+    fig_violin = create_forecast_error_distribution(df, horizon=1, chart_type="Violin")
+    assert fig_box is not None
+    assert fig_violin is not None
+
+
 
