@@ -377,9 +377,22 @@ def interval_coverage_summary(
     if set(lower_cols) != set(upper_cols):
         raise ValueError("lower_cols and upper_cols must share the same nominal-level keys")
 
+    # An empty groupby produces `rows == []`, and pd.DataFrame([]) has no
+    # columns at all (not even horizon_col) -- .sort_values(horizon_col)
+    # below would then raise KeyError instead of returning a well-formed,
+    # zero-row summary. Return the correctly-shaped empty frame up front so
+    # callers (e.g. a source with 0 successfully-evaluated origins) can
+    # check `.empty` without a per-call try/except.
+    if df.empty:
+        cols = [horizon_col]
+        for level in sorted(lower_cols):
+            tag = str(int(level)) if float(level).is_integer() else str(level)
+            cols += [f"target_nominal_{tag}", f"empirical_coverage_{tag}", f"mean_interval_width_{tag}"]
+        return pd.DataFrame(columns=cols)
+
     rows = []
     for h, sub in df.groupby(horizon_col):
-        row: dict = {"horizon": h}
+        row: dict = {horizon_col: h}
         actual = sub[actual_col].to_numpy()
         for level in sorted(lower_cols):
             lo = sub[lower_cols[level]].to_numpy()

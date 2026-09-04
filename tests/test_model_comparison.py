@@ -645,3 +645,41 @@ def test_interval_coverage_summary_rejects_mismatched_level_keys():
             df, actual_col="actual",
             lower_cols={90.0: "lo"}, upper_cols={95.0: "hi"},
         )
+
+
+def test_interval_coverage_summary_empty_input_returns_empty_not_crash():
+    """A source that evaluated zero origins (e.g. every fit failed) must get
+    back a zero-row DataFrame with the right columns, not a KeyError from
+    sort_values() on a columnless empty frame (found in review of PR #111)."""
+    df = pd.DataFrame(columns=["horizon", "actual", "lower_90", "upper_90", "lower_95", "upper_95"])
+    summary = interval_coverage_summary(
+        df, actual_col="actual",
+        lower_cols={90.0: "lower_90", 95.0: "lower_95"},
+        upper_cols={90.0: "upper_90", 95.0: "upper_95"},
+    )
+    assert isinstance(summary, pd.DataFrame)
+    assert summary.empty
+    for col in (
+        "horizon", "target_nominal_90", "empirical_coverage_90", "mean_interval_width_90",
+        "target_nominal_95", "empirical_coverage_95", "mean_interval_width_95",
+    ):
+        assert col in summary.columns
+
+
+def test_interval_coverage_summary_honours_custom_horizon_col_name():
+    """The per-row dict used to hardcode the literal 'horizon' key regardless
+    of horizon_col, so a caller passing a differently-named grouping column
+    would silently get a 'horizon' column back instead."""
+    df = pd.DataFrame({
+        "h": [1, 1],
+        "actual": [1.0, 2.0],
+        "lo": [0.5, 1.5],
+        "hi": [1.5, 2.5],
+    })
+    summary = interval_coverage_summary(
+        df, actual_col="actual",
+        lower_cols={90.0: "lo"}, upper_cols={90.0: "hi"},
+        horizon_col="h",
+    )
+    assert "h" in summary.columns
+    assert "horizon" not in summary.columns
