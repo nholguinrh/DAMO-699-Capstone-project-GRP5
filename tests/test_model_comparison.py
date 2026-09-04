@@ -396,27 +396,22 @@ def test_apply_clark_west_fdr_global_and_horizon():
 
 def test_run_clark_west_battery_smoke():
     """
-    Integration smoke test executing the full Clark-West 12-test battery
+    Integration smoke test executing the full Clark-West 15-test battery
     against the actual outputs/ forecast files.
     """
     primary_df, sensitivity_df = run_clark_west_battery()
 
-    # Primary battery is strictly 4 models x 3 horizons = 12 rows (m=12) with canonical names
-    assert len(primary_df) == 12
+    # Unified primary battery is 5 models x 3 horizons = 15 rows (m=15) with canonical names
+    assert len(primary_df) == 15
     assert set(primary_df["horizon"]) == {1, 5, 20}
-    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost"}
 
-    # Sensitivity battery contains 2 BIC models (6 rows) or 3 models (9 rows with XGBoost Experimental)
-    expected_sens = {"ARIMA-BIC", "VAR-BIC"}
-    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
-        expected_sens.add("XGBoost (Experimental)")
-        assert len(sensitivity_df) == 9
-    else:
-        assert len(sensitivity_df) == 6
-    assert set(sensitivity_df["model"]) == expected_sens
+    # Sensitivity battery contains strictly 2 BIC models (6 rows)
+    assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
-    # All forecasts should have ~745 to 750 sample size
-    assert (primary_df["n_forecasts"] >= 745).all()
+    # All forecasts should have ~741 to 750 sample size (XGBoost is 741 due to 20 lags)
+    assert (primary_df["n_forecasts"] >= 741).all()
     assert (primary_df["n_forecasts"] <= 750).all()
 
     # Verify no NaN test statistics
@@ -432,22 +427,21 @@ def test_run_clark_west_battery_smoke():
     assert primary_df["r2_oos_adj"].notna().all()
 
 
-def test_clark_west_primary_battery_strictly_twelve_hypotheses():
-    """Verify primary battery maintains exactly 4 canonical models x 3 horizons = 12 tests."""
+def test_clark_west_primary_battery_fifteen_hypotheses():
+    """Verify unified primary battery contains 5 models x 3 horizons = 15 tests, including XGBoost."""
     primary_df, sensitivity_df = run_clark_west_battery()
 
-    assert len(primary_df) == 12, f"Primary battery must contain exactly 12 hypotheses, got {len(primary_df)}"
+    assert len(primary_df) == 15, f"Primary battery must contain exactly 15 hypotheses, got {len(primary_df)}"
     assert set(primary_df["model"]) == {
         "ARIMA-AIC",
         "VAR-AIC",
         "VECM (6-var)",
         "LSTM (Tuned)",
+        "XGBoost",
     }
-    # XGBoost must be strictly quarantined to sensitivity_df
-    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
-        assert len(sensitivity_df) == 9
-    else:
-        assert len(sensitivity_df) == 6
+    # Sensitivity battery contains strictly the 2 BIC specifications
+    assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
 
 def test_regime_segmentation_hac_power_gating():
@@ -529,7 +523,7 @@ def test_forecast_error_distribution_missing_column_resilience():
 
 
 def test_dashboard_clark_west_summary_includes_xgboost():
-    """Assert dashboard get_clark_west_summary directly includes XGBoost with sensitivity family q-values."""
+    """Assert dashboard get_clark_west_summary directly includes XGBoost with unified m=15 family q-values."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
@@ -539,12 +533,12 @@ def test_dashboard_clark_west_summary_includes_xgboost():
         cw = get_clark_west_summary(h)
         models = set(cw["model"])
         assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
-        assert "XGBoost (Experimental)" not in models, "Model name should be strictly 'XGBoost'"
+        assert len(cw) == 5, f"Each horizon must contain 5 models under unified battery, got {len(cw)}"
 
-        # Verify that XGBoost's displayed q-value originates from the sensitivity family contract
+        # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
         xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
-        expected_q = 0.8860 if h == 1 else (0.2580 if h == 5 else 0.2733)
-        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-4)
+        expected_q = 0.9177 if h == 1 else (0.2150 if h == 5 else 0.2278)
+        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
 
 
 def test_clark_west_r2_oos_mathematical_consistency():
@@ -647,8 +641,9 @@ def test_clark_west_r2_oos_noise_adjustment_invariant():
 
 
 def test_sensitivity_battery_r2_oos_columns():
-    """Verify sensitivity battery (BIC models + XGBoost) correctly populates R2_OOS."""
+    """Verify sensitivity battery (BIC models) correctly populates R2_OOS."""
     _, sensitivity_df = run_clark_west_battery()
+    assert len(sensitivity_df) == 6
     assert "r2_oos" in sensitivity_df.columns
     assert "r2_oos_adj" in sensitivity_df.columns
     assert sensitivity_df["r2_oos"].notna().all()

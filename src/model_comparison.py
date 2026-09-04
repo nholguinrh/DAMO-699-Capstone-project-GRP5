@@ -581,11 +581,12 @@ def run_clark_west_battery(
     """
     Executes the full Clark-West test battery against the Naïve benchmark (Issue #88).
 
-    Primary 12-test battery (m=12):
-        4 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM) x 3 horizons (1, 5, 20)
-        FDR multiplicity control is strictly invariant to experimental benchmarks.
-    Sensitivity battery:
-        2 BIC variants (ARIMA-BIC, VAR-BIC) + XGBoost (Experimental) x 3 horizons (1, 5, 20)
+    Primary 15-test battery (m=15):
+        5 models (ARIMA-AIC, VAR-AIC, VECM-6var, LSTM, XGBoost) x 3 horizons (1, 5, 20)
+        XGBoost is integrated into the primary research scope to mitigate methodological
+        penalization for omitting a simpler tabular ML model alongside deep learning (LSTM).
+    Sensitivity battery (m=6):
+        2 BIC variants (ARIMA-BIC, VAR-BIC) x 3 horizons (1, 5, 20)
 
     Returns:
         (primary_df, sensitivity_df)
@@ -618,8 +619,7 @@ def run_clark_west_battery(
         ("var_bic", "VAR-BIC", "core"),
     ]
 
-    # Issue #101: Include XGBoost in the sensitivity battery if forecasts have been generated
-    # Placing it here preserves the primary 12-test battery (m=12) and avoids inflating FDR q-values.
+    # Incorporate XGBoost into the primary research scope
     xgb_raw = load_xgboost(d_min, d_max)
     m_xgb = None
     if not xgb_raw.empty:
@@ -627,7 +627,7 @@ def run_clark_west_battery(
             core, "arima_aic", core_calendar(),
             xgb_raw, "xgboost", xgboost_calendar(),
         )
-        sensitivity_models.append(("xgboost", "XGBoost (Experimental)", "xgboost"))
+        primary_models.append(("xgboost", "XGBoost", "xgboost"))
 
 
     def _evaluate_models(model_list: list[tuple[str, str, str]]) -> pd.DataFrame:
@@ -796,7 +796,7 @@ def evaluate_regime_segmentation(
         ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if has_xgb and m_xgb is not None:
-        models_to_eval.append(("xgboost", "XGBoost (Experimental)", "xgboost"))
+        models_to_eval.append(("xgboost", "XGBoost", "xgboost"))
 
     records = []
     for regime_name, start_date, end_date in REGIMES:

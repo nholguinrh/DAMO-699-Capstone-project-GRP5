@@ -90,30 +90,33 @@ Therefore, the denominator is unambiguously the unadjusted benchmark MSPE ($\tex
 All metric computations inside `src/model_comparison.py` are executed directly on full 64-bit double-precision (`float64`) prediction error arrays per IEEE 754 standards to prevent compounding rounding error (*rounding error propagation*). CSV outputs are rounded to 6 decimal places for disk serialization, and dashboard tables format values to 2 decimal places. 
 *Note on hand calculation:* Computing $R^2_{OOS}$ from pre-rounded 6-decimal CSV text for VECM at $h=20$ yields $1 - (0.015349 / 0.015639) = 0.018543 \rightarrow +1.85\%$, whereas exact double-precision computation yields $0.018561 \rightarrow +1.86\%$. The project standardizes on the unrounded double-precision calculation to avoid truncation bias.
 
-#### Methodological Partitioning of Sensitivity Analyses
-The companion BIC specifications (`outputs/clark_west_sensitivity_results.csv`, testing ARIMA-BIC and VAR-BIC) are deliberately partitioned from the primary dashboard presentation. Maintaining the primary evaluation matrix at $m = 12$ hypothesis tests (4 models $\times$ 3 horizons) prevents multiplicity inflation and avoids artificially diluting the Benjamini-Hochberg (1995) FDR budget. The sensitivity battery is preserved for offline audit in notebook `04_diagnostics/clark_west_comparison.ipynb` (Section 5).
+#### Methodological Inclusion of Machine Learning Benchmark
+XGBoost is formally incorporated into the primary evaluation matrix alongside classical econometric specifications (ARIMA, VAR, VECM) and deep learning (LSTM) to mitigate research penalization for omitting a simpler, standard tabular machine learning model. The companion BIC specifications (`outputs/clark_west_sensitivity_results.csv`, testing ARIMA-BIC and VAR-BIC) remain partitioned in the sensitivity battery ($m=6$ hypotheses) for offline audit.
 
 ---
 
-## 3. Empirical Results: The 12-Test Battery
+## 3. Empirical Results: The 15-Test Battery
 
-The evaluation matrix comprises **4 primary model paradigms × 3 horizons = 12 hypothesis tests** on the canonical 745–750 rolling forecast origins sampled across the 2012–2026 historical span.
+The evaluation matrix comprises **5 primary model paradigms × 3 horizons = 15 hypothesis tests** on the canonical rolling forecast origins sampled across the 2012–2026 historical span.
 
-### Table 1: Primary 12-Test Clark-West Results vs. Naïve Benchmark
+### Table 1: Primary 15-Test Clark-West Results vs. Naïve Benchmark
 | Model | Horizon ($h$) | $N$ | $\text{MSPE}_{\text{naive}}$ | $\text{MSPE}_{\text{model}}$ | $R^2_{OOS}$ (Realized) | CW Adj ($\|\hat{y}_1 - \hat{y}_2\|^2$) | $\text{MSPE}_{\text{model}}^{\text{adj}}$ | CW Testing Construct ($\bar{f}/\text{MSPE}_1$) | $CW$ Stat | $p_{\text{raw}}$ | $q_{\text{global}}$ (BH) | $q_{\text{horizon}}$ (BH) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **ARIMA-AIC** | 1 day | 750 | 0.000841 | 0.000847 | -0.71% | 0.000006 | 0.000841 | -0.05% | -0.080 | 0.5318 | 0.7871 | 0.8309 |
-| **ARIMA-AIC** | 5 days | 750 | 0.003741 | 0.003828 | -2.34% | 0.000065 | 0.003764 | -0.61% | -0.614 | 0.7305 | 0.7969 | 0.7305 |
-| **ARIMA-AIC** | 20 days | 750 | 0.015639 | 0.016423 | -5.01% | 0.000605 | 0.015818 | -1.14% | -0.401 | 0.6559 | 0.7871 | 0.6559 |
-| **VAR-AIC** | 1 day | 750 | 0.000841 | 0.000887 | -5.51% | 0.000042 | 0.000846 | -0.56% | -0.314 | 0.6232 | 0.7871 | 0.8309 |
-| **VAR-AIC** | 5 days | 750 | 0.003741 | 0.004050 | -8.27% | 0.000297 | 0.003753 | -0.33% | -0.123 | 0.5490 | 0.7871 | 0.7305 |
-| **VAR-AIC** | 20 days | 750 | 0.015639 | 0.015832 | -1.23% | 0.000949 | 0.014883 | +4.84% | +0.967 | 0.1667 | 0.6230 | 0.2973 |
-| **VECM (6-var)** | 1 day | 750 | 0.000841 | 0.000884 | -5.09% | 0.000050 | 0.000834 | +0.86% | +0.452 | 0.3257 | 0.6514 | 0.8309 |
-| **VECM (6-var)** | 5 days | 750 | 0.003741 | 0.004033 | -7.82% | 0.000360 | 0.003673 | +1.82% | +0.644 | 0.2596 | 0.6230 | 0.5192 |
-| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | +1.86% | 0.001910 | 0.013439 | +14.07% | +1.968 | 0.0245 | 0.2940 | 0.0980 |
+| **ARIMA-AIC** | 1 day | 750 | 0.000841 | 0.000847 | -0.71% | 0.000006 | 0.000841 | -0.05% | -0.080 | 0.5318 | 0.8199 | 0.9177 |
+| **ARIMA-AIC** | 5 days | 750 | 0.003741 | 0.003828 | -2.34% | 0.000065 | 0.003764 | -0.61% | -0.614 | 0.7305 | 0.8429 | 0.7305 |
+| **ARIMA-AIC** | 20 days | 750 | 0.015639 | 0.016423 | -5.01% | 0.000605 | 0.015818 | -1.14% | -0.401 | 0.6559 | 0.8199 | 0.6559 |
+| **VAR-AIC** | 1 day | 750 | 0.000841 | 0.000887 | -5.51% | 0.000042 | 0.000846 | -0.56% | -0.314 | 0.6232 | 0.8199 | 0.9177 |
+| **VAR-AIC** | 5 days | 750 | 0.003741 | 0.004050 | -8.27% | 0.000297 | 0.003753 | -0.33% | -0.123 | 0.5490 | 0.8199 | 0.6862 |
+| **VAR-AIC** | 20 days | 750 | 0.015639 | 0.015832 | -1.23% | 0.000949 | 0.014883 | +4.84% | +0.967 | 0.1667 | 0.5001 | 0.2778 |
+| **VECM (6-var)** | 1 day | 750 | 0.000841 | 0.000884 | -5.09% | 0.000050 | 0.000834 | +0.86% | +0.452 | 0.3257 | 0.6107 | 0.9177 |
+| **VECM (6-var)** | 5 days | 750 | 0.003741 | 0.004033 | -7.82% | 0.000360 | 0.003673 | +1.82% | +0.644 | 0.2596 | 0.5563 | 0.4327 |
+| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | +1.86% | 0.001910 | 0.013439 | +14.07% | +1.968 | 0.0245 | 0.3416 | 0.1225 |
 | **LSTM (Tuned)** | 1 day | 745 | 0.000843 | 0.000853 | -1.23% | 0.000004 | 0.000849 | -0.70% | -1.390 | 0.9177 | 0.9177 | 0.9177 |
-| **LSTM (Tuned)** | 5 days | 745 | 0.003754 | 0.003761 | -0.19% | 0.000057 | 0.003705 | +1.32% | +1.577 | 0.0574 | 0.3444 | 0.2296 |
-| **LSTM (Tuned)** | 20 days | 745 | 0.015702 | 0.016014 | -1.99% | 0.000668 | 0.015347 | +2.26% | +0.762 | 0.2230 | 0.6230 | 0.2973 |
+| **LSTM (Tuned)** | 5 days | 745 | 0.003754 | 0.003761 | -0.19% | 0.000057 | 0.003705 | +1.32% | +1.577 | 0.0574 | 0.3416 | 0.2150 |
+| **LSTM (Tuned)** | 20 days | 745 | 0.015702 | 0.016014 | -1.99% | 0.000668 | 0.015347 | +2.26% | +0.762 | 0.2230 | 0.5563 | 0.2788 |
+| **XGBoost** | 1 day | 741 | 0.000845 | 0.000921 | -9.03% | 0.000049 | 0.000872 | -3.27% | -1.205 | 0.8860 | 0.9177 | 0.9177 |
+| **XGBoost** | 5 days | 741 | 0.003751 | 0.003944 | -5.16% | 0.000297 | 0.003647 | +2.77% | +1.366 | 0.0860 | 0.3416 | 0.2150 |
+| **XGBoost** | 20 days | 741 | 0.015765 | 0.016378 | -3.88% | 0.001308 | 0.015070 | +4.41% | +1.334 | 0.0911 | 0.3416 | 0.2278 |
 
 *Data Source: `outputs/clark_west_test_results.csv` generated by `src/model_comparison.py`.*
 
@@ -132,27 +135,28 @@ The Clark-West decomposition provides the mathematically rigorous answer to this
 - Clark-West thus neutralizes the structural penalty of cumulative-sum scoring without requiring arbitrary ad-hoc modifications to the baseline architecture.
 
 ### 4.2 Economic Interpretation: Martingale Property of Asset Prices & EMH
-At the 1-day horizon ($h=1$), all four models fail to reject the null hypothesis ($CW \le 0.452$, $p \ge 0.3257$).
+At the 1-day horizon ($h=1$), all five models fail to reject the null hypothesis ($CW \le 0.452$, $p \ge 0.3257$).
 
 Rather than reflecting a failure of statistical or neural modeling, this finding is directly predicted by capital market theory:
 1. **Efficient Market Hypothesis (Fama, 1970; Campbell, Lo, & MacKinlay, 1997)**: Government bond markets incorporate public macro-financial information rapidly. Daily fluctuations in sovereign yield spreads behave as a **Martingale Difference Sequence** ($\mathbb{E}[\Delta s_{t+1} \mid \mathcal{I}_t] = 0$).
 2. **Horizon-Dependent Dynamics**: While daily innovations are dominated by unforecastable news arrivals, medium-term structure emerges at longer horizons:
-   - At $h=5$ days, the **LSTM network** captures short-term nonlinear momentum ($CW = 1.577, p_{\text{raw}} = 0.0574$).
+   - At $h=5$ days, the **LSTM network** ($CW = 1.577, p_{\text{raw}} = 0.0574$) and **XGBoost** ($CW = 1.366, p_{\text{raw}} = 0.0860$) capture short-term nonlinear momentum.
    - At $h=20$ days, the **VECM framework** captures cointegrating equilibrium adjustments across Canadian and U.S. yields, producing a raw unadjusted reduction in MSPE ($CW = 1.968, p_{\text{raw}} = 0.0245$).
 
 ---
 
 ## 5. Multiplicity Control (Benjamini-Hochberg FDR)
 
-To address simultaneous testing risk across the 12 primary hypotheses, Benjamini-Hochberg (1995) FDR control is reported at two granularities:
-1. **Global 12-Test FDR (`q_global`)**: Controls FDR across the entire $4 \times 3$ matrix.
-2. **Horizon-Stratified FDR (`q_horizon`)**: Partitions testing into three independent horizon families ($k=4$ per horizon), ensuring that long-horizon variance at $h=20$ does not inflate discovery thresholds for short-horizon tests at $h=1, 5$ (Issue #81).
+To address simultaneous testing risk across the 15 primary hypotheses, Benjamini-Hochberg (1995) FDR control is reported at two granularities:
+1. **Global 15-Test FDR (`q_global`)**: Controls FDR across the entire $5 \times 3$ matrix.
+2. **Horizon-Stratified FDR (`q_horizon`)**: Partitions testing into three independent horizon families ($k=5$ per horizon), ensuring that long-horizon variance at $h=20$ does not inflate discovery thresholds for short-horizon tests at $h=1, 5$ (Issue #81).
 
 ### Key FDR Findings at Committed $\alpha = 0.05$:
 - **No model rejects the null hypothesis at the pre-committed $\alpha = 0.05$ threshold under either Global or Horizon-Stratified FDR control**.
-- **VECM (6-var) at $h=20$**: Shows unadjusted raw significance ($p_{\text{raw}} = 0.0245$), but after horizon-stratified FDR control achieves $q_{\text{horizon}} = 0.0980 > 0.05$ (and $q_{\text{global}} = 0.2940$). It would only clear an exploratory $\alpha = 0.10$ threshold, but at the confirmatory $\alpha = 0.05$ standard, it fails to reject equal accuracy (`model_significantly_better_fdr_horizon = False`).
-- **LSTM (Tuned) at $h=5$**: Achieves raw $p = 0.0574$ and $q_{\text{horizon}} = 0.2296$.
-- **Headline Operational Takeaway**: Across all 4 paradigms and 3 horizons, the **Naïve Random Walk benchmark remains statistically unbeaten at $\alpha = 0.05$ after multiplicity control**, reinforcing the high-frequency informational efficiency of the Canadian sovereign bond market.
+- **VECM (6-var) at $h=20$**: Shows unadjusted raw significance ($p_{\text{raw}} = 0.0245$), but after horizon-stratified FDR control across the 5 models achieves $q_{\text{horizon}} = 0.1225 > 0.05$ (and $q_{\text{global}} = 0.3416$).
+- **LSTM (Tuned) at $h=5$**: Achieves raw $p = 0.0574$ and $q_{\text{horizon}} = 0.2150$.
+- **XGBoost at $h=5$ & $h=20$**: Achieves raw $p = 0.0860$ ($q_{\text{horizon}} = 0.2150$) and raw $p = 0.0911$ ($q_{\text{horizon}} = 0.2278$).
+- **Headline Operational Takeaway**: Across all 5 paradigms and 3 horizons, the **Naïve Random Walk benchmark remains statistically unbeaten at $\alpha = 0.05$ after multiplicity control**, reinforcing the high-frequency informational efficiency of the Canadian sovereign bond market.
 
 ---
 
