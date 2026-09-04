@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 # Make ``project_paths`` importable whether the dashboard is launched as
 # ``streamlit run src/dashboard/app.py`` (src/dashboard on sys.path) or via the
@@ -66,8 +67,17 @@ def load_xgboost_forecasts() -> pd.DataFrame | None:
 # EVALUATION OUTPUTS
 # =========================================================
 
+@st.cache_data(show_spinner=False)
 def load_clark_west_results() -> pd.DataFrame:
     return _read_csv("clark_west_test_results.csv")
+
+
+@st.cache_data(show_spinner=False)
+def load_clark_west_sensitivity_results() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "clark_west_sensitivity_results.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
 
 
 def load_arima_metrics() -> pd.DataFrame:
@@ -138,6 +148,7 @@ def load_gold_features() -> pd.DataFrame | None:
 # COMMON FORECAST DATASET
 # =========================================================
 
+@st.cache_data(show_spinner=False)
 def build_common_forecast_dataset() -> pd.DataFrame:
     arima = load_arima_forecasts().copy()
     var = load_var_forecasts().copy()
@@ -279,15 +290,16 @@ def build_common_forecast_dataset() -> pd.DataFrame:
 # COMMON-SAMPLE METRICS
 # =========================================================
 
+@st.cache_data(show_spinner=False)
 def build_common_sample_metrics() -> pd.DataFrame:
     df = build_common_forecast_dataset()
 
     model_columns = {
         "Naïve Random Walk": "naive",
-        "ARIMA": "arima_aic",
-        "VAR": "var_aic",
-        "VECM": "vecm",
-        "LSTM": "lstm",
+        "ARIMA-AIC": "arima_aic",
+        "VAR-AIC": "var_aic",
+        "VECM (6-var)": "vecm",
+        "LSTM (Tuned)": "lstm",
     }
     if "xgboost" in df.columns:
         model_columns["XGBoost"] = "xgboost"
@@ -441,6 +453,7 @@ def get_eda_findings() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data(show_spinner=False)
 def load_regime_metrics() -> pd.DataFrame | None:
     """
     Loads macroeconomic monetary policy regime segmented metrics (Issue #101).
