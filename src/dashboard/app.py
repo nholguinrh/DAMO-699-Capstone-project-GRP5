@@ -14,10 +14,17 @@ from data_loader import (
     load_fevd_results,
     load_gold_features,
     load_irf_results,
-    load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
 )
+
+try:
+    from data_loader import load_regime_metrics
+except ImportError:
+    import importlib
+    import data_loader
+    importlib.reload(data_loader)
+    from data_loader import load_regime_metrics
 
 from charts import (
     MODEL_COLUMNS,
