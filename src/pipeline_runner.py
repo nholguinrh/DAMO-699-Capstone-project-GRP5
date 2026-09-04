@@ -56,14 +56,21 @@ def _sources() -> tuple[tuple[str, str, Callable[..., Any]], ...]:
 def _run_source(
     fetch: Callable[..., Any],
     mode: str,
-    start: str,
-    end: str,
+    start: str | None,
+    end: str | None,
 ) -> dict[str, Any]:
     """
     Run one Path A source and return a status dict (never raises).
 
     ``cache`` mode rebuilds from the local raw JSON. ``live`` mode attempts an
     API pull and, on failure, falls back to that source's local cache.
+
+    ``start`` / ``end`` are forwarded untouched (``None`` included) so each
+    source applies its own default window -- StatCan opens on
+    ``config.CPI_REFERENCE_START`` (a day earlier, for month-aligned reference
+    periods), BoC and FRED on ``config.DATE_START``. Passing the resolved
+    ``DATE_START`` to StatCan here would clamp off reference month
+    ``2009-01-01`` and shift the canonical Gold sample forward by a month.
     """
     if mode == "cache":
         try:
@@ -124,6 +131,10 @@ def run_pipeline(
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}; got {mode!r}")
 
+    # Resolved only for the run report and the CPI-coverage check below. The
+    # raw start_date / end_date (None included) are what reach each source, so
+    # per-source defaults (StatCan's CPI_REFERENCE_START) are preserved -- this
+    # matches src/run_data_collection.py, which also forwards args untouched.
     start, end = resolve_date_range(start_date, end_date)
 
     report: dict[str, Any] = {
@@ -146,7 +157,10 @@ def run_pipeline(
         )
 
     for key, name, fetch in _sources():
-        report["sources"][key] = {"name": name, **_run_source(fetch, mode, start, end)}
+        report["sources"][key] = {
+            "name": name,
+            **_run_source(fetch, mode, start_date, end_date),
+        }
 
     any_source_failed = any(s["status"] == "failed" for s in report["sources"].values())
 

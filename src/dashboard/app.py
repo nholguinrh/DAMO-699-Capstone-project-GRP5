@@ -172,7 +172,9 @@ _pipeline_mode = st.sidebar.radio(
 _pipeline_end = st.sidebar.date_input(
     "Ingestion end date",
     value=date.fromisoformat(PIPELINE_END_DEFAULT),
-    min_value=date(2009, 2, 1),
+    # The Gold frame needs 12 months of CPI before the first YoY row
+    # (canonical start 2010-02-19); an earlier end date yields an empty frame.
+    min_value=date(2010, 3, 1),
     max_value=date.today(),
     key="pipeline_end_date",
 )
@@ -242,7 +244,13 @@ if st.sidebar.button(
     # CSV. clear() is a harmless no-op today and stays correct if caching is
     # added later.
     st.cache_data.clear()
-    st.rerun()
+
+    # On error, keep the expanded st.status box (with the per-source failure
+    # detail) on screen -- an st.rerun() here would wipe it and leave only the
+    # 🔴 sidebar badge. On success / warning the rerun refreshes the dashboard
+    # against the freshly rebuilt data.
+    if _report["status"] != "error":
+        st.rerun()
 
 st.sidebar.caption(
     "Runs the Path A pipeline: rebuilds data/processed/*.csv and the Gold "

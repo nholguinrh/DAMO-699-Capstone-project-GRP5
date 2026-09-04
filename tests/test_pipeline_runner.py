@@ -74,6 +74,25 @@ def test_end_date_is_threaded_to_every_source(patched):
         assert end == "2025-12-31", name
 
 
+def test_unset_window_reaches_sources_as_none(patched):
+    """With no override, each source must receive ``None`` -- not the resolved
+    DATE_START -- so StatCan keeps its earlier CPI_REFERENCE_START default and
+    the canonical Gold sample is not shifted forward a month (Lerneir, PR #105)."""
+    report = pr.run_pipeline(mode="cache")
+
+    for name, _mode, start, end in patched["calls"][:3]:
+        assert start is None, name
+        assert end is None, name
+    # the report window is still the resolved config default
+    assert report["window"] == {"start": "2009-01-02", "end": "2026-06-30"}
+
+
+def test_explicit_start_date_is_threaded_to_every_source(patched):
+    pr.run_pipeline(mode="cache", start_date="2015-01-02", end_date="2025-12-31")
+    for name, _mode, start, _end in patched["calls"][:3]:
+        assert start == "2015-01-02", name
+
+
 def test_status_file_written_and_readback(patched):
     report = pr.run_pipeline(mode="cache")
     assert pr.STATUS_PATH.exists()
