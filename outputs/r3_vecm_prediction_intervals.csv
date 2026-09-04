@@ -1,0 +1,4 @@
+model,horizon,target_nominal_90,empirical_coverage_90,mean_interval_width_90,target_nominal_95,empirical_coverage_95,mean_interval_width_95
+VECM (6-var),1,90.0,88.4,0.0888,95.0,92.8,0.1058
+VECM (6-var),5,90.0,88.13,0.1939,95.0,92.4,0.2311
+VECM (6-var),20,90.0,85.47,0.3502,95.0,91.07,0.4173

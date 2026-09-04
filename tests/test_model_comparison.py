@@ -17,6 +17,8 @@ from src.model_comparison import (
     apply_clark_west_fdr,
     attach_target_date,
     clark_west_test,
+    cumulative_var_level_interval,
+    interval_coverage_summary,
     merge_cross_pipeline,
     pairwise_dm,
     plain_language_verdict,
@@ -759,5 +761,162 @@ def test_dashboard_r2_oos_formatting_vectorized_direct():
     assert res.iloc[3] == "—"
 
 
+# ---------------------------------------------------------------------------
+# Prediction intervals (issue #103)
+# ---------------------------------------------------------------------------
+
+class _FakeVarFit:
+    """Duck-types the subset of VARResultsWrapper cumulative_var_level_interval()
+    needs, so its math can be checked against a hand-derived closed form without
+    fitting a real (sampling-noisy) VAR."""
+
+    def __init__(self, phi: np.ndarray, sigma_u: np.ndarray):
+        self._phi = phi  # (maxn+1, k, k), phi[0] must be I_k
+        self.sigma_u = sigma_u
+
+    def ma_rep(self, maxn):
+        return self._phi[: maxn + 1]
 
 
+def test_cumulative_var_level_interval_white_noise_scales_linearly_with_h():
+    """For an undifferenced-further, purely white-noise VAR (Phi_i = 0 for i > 0,
+    i.e. the differenced series has no own dynamics), the h-step cumulative level
+    variance must be exactly h * sigma_u -- summing h i.i.d. shocks. This is the
+    textbook random-walk variance identity and the simplest exact check of the
+    Psi-cumulative formula."""
+    max_h = 5
+    sigma_u = np.array([[2.0]])
+    phi = np.zeros((max_h, 1, 1))
+    phi[0] = np.eye(1)  # Phi_0 = I; Phi_1..Phi_{max_h-1} = 0
+
+    fake = _FakeVarFit(phi, sigma_u)
+    half_widths = cumulative_var_level_interval(fake, target_idx=0, max_h=max_h, alphas=(0.05,))
+
+    z = 1.9599639845400545  # scipy.stats.norm.ppf(0.975)
+    implied_var = (half_widths[0.05] / z) ** 2
+    expected_var = sigma_u[0, 0] * np.arange(1, max_h + 1)  # h * sigma_u
+    assert np.allclose(implied_var, expected_var, rtol=1e-6)
+
+
+def test_cumulative_var_level_interval_matches_hand_derivation():
+    """Non-trivial single lag (Phi_1 = 0.5, Phi_i>=2 = 0): Sigma_level_h must equal
+    the closed-form sum_{m=0}^{h-1} Psi_m^2 * sigma_u derived in the function's
+    docstring, computed independently here rather than by calling the code under
+    test a second time."""
+    max_h = 5
+    sigma_u = np.array([[1.0]])
+    phi = np.zeros((max_h, 1, 1))
+    phi[0] = np.eye(1)
+    phi[1] = np.array([[0.5]])
+    # phi[2:] left at 0
+
+    fake = _FakeVarFit(phi, sigma_u)
+    half_widths = cumulative_var_level_interval(fake, target_idx=0, max_h=max_h, alphas=(0.05,))
+    z = 1.9599639845400545
+    implied_var = (half_widths[0.05] / z) ** 2
+
+    psi = np.cumsum(phi[:, 0, 0])  # Psi_0..Psi_4 = 1, 1.5, 1.5, 1.5, 1.5
+    expected_var = np.cumsum(psi ** 2) * sigma_u[0, 0]
+    assert np.allclose(implied_var, expected_var, rtol=1e-6)
+    assert np.allclose(expected_var, [1.0, 3.25, 5.5, 7.75, 10.0])
+
+
+def test_cumulative_var_level_interval_widens_with_horizon_and_alpha():
+    """Sanity properties that must hold regardless of the exact VAR dynamics:
+    the band cannot shrink as h grows (variance accumulates), and the 95% band
+    must never be narrower than the 90% band at the same horizon."""
+    rng = np.random.default_rng(0)
+    max_h = 6
+    k = 2
+    phi = np.zeros((max_h, k, k))
+    phi[0] = np.eye(k)
+    for i in range(1, max_h):
+        phi[i] = 0.3 * rng.standard_normal((k, k)) * (0.6 ** i)  # decaying MA coefs
+    a = rng.standard_normal((k, k)) * 0.1
+    sigma_u = a @ a.T + np.eye(k) * 0.5  # guaranteed PSD
+
+    fake = _FakeVarFit(phi, sigma_u)
+    half_widths = cumulative_var_level_interval(fake, target_idx=0, max_h=max_h, alphas=(0.10, 0.05))
+
+    hw90, hw95 = half_widths[0.10], half_widths[0.05]
+    assert np.all(np.diff(hw90) >= -1e-10)
+    assert np.all(np.diff(hw95) >= -1e-10)
+    assert np.all(hw95 >= hw90 - 1e-10)
+
+
+def test_interval_coverage_summary_basic():
+    """A hand-constructed 2-horizon frame where coverage and width are known
+    by inspection -- h=1: both origins covered by the 90% band, only the
+    second by the (deliberately narrower, off-center) 95% band; h=5: neither
+    origin covered by either band."""
+    df = pd.DataFrame({
+        "horizon": [1, 1, 5, 5],
+        "actual": [1.0, 2.0, 10.0, 20.0],
+        "lower_90": [0.5, 1.5, 100.0, 100.0],
+        "upper_90": [1.5, 2.5, 101.0, 101.0],
+        "lower_95": [1.05, 1.5, 100.0, 100.0],  # excludes actual=1.0
+        "upper_95": [1.15, 2.5, 101.0, 101.0],
+    })
+
+    summary = interval_coverage_summary(
+        df, actual_col="actual",
+        lower_cols={90.0: "lower_90", 95.0: "lower_95"},
+        upper_cols={90.0: "upper_90", 95.0: "upper_95"},
+    )
+
+    h1 = summary[summary["horizon"] == 1].iloc[0]
+    assert h1["empirical_coverage_90"] == 100.0
+    assert h1["empirical_coverage_95"] == 50.0  # only actual=2.0 falls inside [1.5, 2.5]
+    assert np.isclose(h1["mean_interval_width_90"], 1.0)  # (1.5-0.5 + 2.5-1.5) / 2
+    assert np.isclose(h1["mean_interval_width_95"], 0.55)  # (1.15-1.05 + 2.5-1.5) / 2
+
+    h5 = summary[summary["horizon"] == 5].iloc[0]
+    assert h5["empirical_coverage_90"] == 0.0
+    assert h5["empirical_coverage_95"] == 0.0
+
+
+def test_interval_coverage_summary_rejects_mismatched_level_keys():
+    df = pd.DataFrame({"horizon": [1], "actual": [1.0], "lo": [0.5], "hi": [1.5]})
+    with pytest.raises(ValueError, match="same nominal-level keys"):
+        interval_coverage_summary(
+            df, actual_col="actual",
+            lower_cols={90.0: "lo"}, upper_cols={95.0: "hi"},
+        )
+
+
+def test_interval_coverage_summary_empty_input_returns_empty_not_crash():
+    """A source that evaluated zero origins (e.g. every fit failed) must get
+    back a zero-row DataFrame with the right columns, not a KeyError from
+    sort_values() on a columnless empty frame (found in review of PR #111)."""
+    df = pd.DataFrame(columns=["horizon", "actual", "lower_90", "upper_90", "lower_95", "upper_95"])
+    summary = interval_coverage_summary(
+        df, actual_col="actual",
+        lower_cols={90.0: "lower_90", 95.0: "lower_95"},
+        upper_cols={90.0: "upper_90", 95.0: "upper_95"},
+    )
+    assert isinstance(summary, pd.DataFrame)
+    assert summary.empty
+    for col in (
+        "horizon", "target_nominal_90", "empirical_coverage_90", "mean_interval_width_90",
+        "target_nominal_95", "empirical_coverage_95", "mean_interval_width_95",
+    ):
+        assert col in summary.columns
+
+
+def test_interval_coverage_summary_honours_custom_horizon_col_name():
+    """The per-row dict used to hardcode the literal 'horizon' key regardless
+    of horizon_col, so a caller passing a differently-named grouping column
+    would silently get a 'horizon' column back instead."""
+    df = pd.DataFrame({
+        "h": [1, 1],
+        "actual": [1.0, 2.0],
+        "lo": [0.5, 1.5],
+        "hi": [1.5, 2.5],
+    })
+    summary = interval_coverage_summary(
+        df, actual_col="actual",
+        lower_cols={90.0: "lo"}, upper_cols={90.0: "hi"},
+        horizon_col="h",
+    )
+    assert "h" in summary.columns
+    assert "horizon" not in summary.columns

@@ -278,7 +278,7 @@ class TestVECMEstimationAndEvaluation:
         diffed = synthetic_cointegrated_levels.diff().dropna()
         diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
 
-        metrics_df, raw, forecasts_df = evaluate_vecm(
+        metrics_df, raw, forecasts_df, interval_summary_df = evaluate_vecm(
             levels=synthetic_cointegrated_levels,
             diffed=diffed,
             k_ar_diff=1,
@@ -300,6 +300,30 @@ class TestVECMEstimationAndEvaluation:
         assert isinstance(forecasts_df, pd.DataFrame)
         assert "origin_date" in forecasts_df.columns
 
+        # Issue #103: VECM analytical prediction-interval columns and summary.
+        for col in ("vecm_lower_90", "vecm_upper_90", "vecm_lower_95", "vecm_upper_95"):
+            assert col in forecasts_df.columns
+        assert (forecasts_df["vecm_lower_90"] <= forecasts_df["vecm"]).all()
+        assert (forecasts_df["vecm"] <= forecasts_df["vecm_upper_90"]).all()
+        # 95% band must nest the 90% band at every origin (wider z-score, same center).
+        assert (forecasts_df["vecm_lower_95"] <= forecasts_df["vecm_lower_90"]).all()
+        assert (forecasts_df["vecm_upper_90"] <= forecasts_df["vecm_upper_95"]).all()
+
+        assert isinstance(interval_summary_df, pd.DataFrame)
+        assert not interval_summary_df.empty
+        assert set(interval_summary_df["model"]) == {"VECM (6-var)"}
+        for col in (
+            "empirical_coverage_90", "mean_interval_width_90",
+            "empirical_coverage_95", "mean_interval_width_95",
+        ):
+            assert col in interval_summary_df.columns
+            assert interval_summary_df[col].notna().all()
+        # Wider nominal level must never produce a narrower average band.
+        assert (
+            interval_summary_df["mean_interval_width_95"]
+            >= interval_summary_df["mean_interval_width_90"]
+        ).all()
+
     def test_evaluate_vecm_with_lagged_bic(self, synthetic_cointegrated_levels, monkeypatch):
         """Validates evaluate_vecm when bic_lag_diff=1 (VAR model)."""
         import src.johansen_vecm as jv
@@ -310,7 +334,7 @@ class TestVECMEstimationAndEvaluation:
         diffed = synthetic_cointegrated_levels.diff().dropna()
         diffed.columns = [f"d_{c}" for c in synthetic_cointegrated_levels.columns]
 
-        metrics_df, raw, forecasts_df = evaluate_vecm(
+        metrics_df, raw, forecasts_df, interval_summary_df = evaluate_vecm(
             levels=synthetic_cointegrated_levels,
             diffed=diffed,
             k_ar_diff=1,
@@ -323,6 +347,8 @@ class TestVECMEstimationAndEvaluation:
         assert isinstance(metrics_df, pd.DataFrame)
         assert not metrics_df.empty
         assert "rmse_var_bic" in metrics_df.columns
+        assert isinstance(interval_summary_df, pd.DataFrame)
+        assert not interval_summary_df.empty
 
 
 class TestDMReportColumns:

@@ -1,0 +1,4 @@
+model,horizon,target_nominal_90,empirical_coverage_90,mean_interval_width_90,target_nominal_95,empirical_coverage_95,mean_interval_width_95
+VAR-AIC,1,90.0,88.67,0.0905,95.0,92.67,0.1078
+VAR-AIC,5,90.0,88.13,0.1984,95.0,93.2,0.2365
+VAR-AIC,20,90.0,86.93,0.3624,95.0,90.8,0.4318
