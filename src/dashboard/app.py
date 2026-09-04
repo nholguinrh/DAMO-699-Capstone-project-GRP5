@@ -1,5 +1,8 @@
+import numpy as np
 import pandas as pd
 import streamlit as st
+
+ALPHA = 0.05
 
 from data_loader import (
     build_common_forecast_dataset,
@@ -8,6 +11,7 @@ from data_loader import (
     get_eda_findings,
     get_pipeline_metadata,
     get_round3_features,
+    load_clark_west_sensitivity_results,
     load_fevd_results,
     load_gold_features,
     load_irf_results,
@@ -621,7 +625,7 @@ with tab_statistics:
         ].tolist()
 
         st.success(
-            "Models significant after horizon-level FDR: "
+            f"Models significant after horizon-level FDR (m=5, α={ALPHA}): "
             + ", ".join(significant_models)
         )
 
@@ -634,27 +638,36 @@ with tab_statistics:
             "after horizon-level FDR correction."
         )
 
-    display_cols = [
-        "model",
-        "cw_stat",
-        "cw_p_value",
-        "cw_p_adj_horizon",
-        "model_significantly_better",
-        "model_significantly_better_fdr_horizon",
-    ]
+    if "r2_oos" in cw_horizon.columns:
+        cw_table = cw_horizon.assign(
+            r2_oos_fmt=cw_horizon["r2_oos"].apply(
+                lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
+            )
+        )
+    else:
+        cw_table = cw_horizon.assign(r2_oos_fmt="—")
 
-    cw_table = cw_horizon[
-        display_cols
-    ].copy()
+    COLUMN_MAPPING = {
+        "model": "Model",
+        "n_forecasts": "N",
+        "r2_oos_fmt": "OOS R² (vs RW)",
+        "cw_stat": "CW Statistic",
+        "cw_p_value": "Raw p-value",
+        "cw_p_adj_horizon": "FDR q-value",
+        "model_significantly_better": "Raw Significant",
+        "model_significantly_better_fdr_horizon": "FDR Significant",
+    }
 
-    cw_table.columns = [
-        "Model",
-        "CW Statistic",
-        "Raw p-value",
-        "FDR q-value",
-        "Raw Significant",
-        "FDR Significant",
-    ]
+    missing_cols = set(COLUMN_MAPPING.keys()) - set(cw_table.columns)
+    if missing_cols:
+        st.error(f"Schema contract violation: missing columns {missing_cols}")
+        st.stop()
+
+    cw_table = (
+        cw_table[list(COLUMN_MAPPING.keys())]
+        .rename(columns=COLUMN_MAPPING)
+        .copy()
+    )
 
     st.dataframe(
         cw_table,
@@ -662,10 +675,37 @@ with tab_statistics:
         use_container_width=True,
     )
 
+    with st.expander("Sensitivity Battery: BIC Model Specifications (m=6)"):
+        sens_df = load_clark_west_sensitivity_results()
+        if sens_df is not None and not sens_df.empty:
+            sens_h = sens_df[sens_df["horizon"] == horizon].copy()
+            if not sens_h.empty:
+                sens_h["r2_oos_fmt"] = sens_h["r2_oos"].apply(
+                    lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
+                )
+                sens_table = (
+                    sens_h[list(COLUMN_MAPPING.keys())]
+                    .rename(columns=COLUMN_MAPPING)
+                    .copy()
+                )
+                st.dataframe(sens_table, hide_index=True, use_container_width=True)
+                st.caption(
+                    "Sensitivity battery evaluates 2 BIC specifications (ARIMA-BIC, VAR-BIC) "
+                    "across 3 horizons under separate m=6 FDR family control."
+                )
+
     st.caption(
-        "Clark-West statistics are loaded directly from the "
-        "canonical project evaluation output and are not "
-        "recalculated in Streamlit."
+        "Out-of-Sample R² (R²_OOS = 1 − MSPE_model / MSPE_naive) measures realized "
+        "proportional MSPE reduction relative to the Naïve Random Walk benchmark "
+        "(Campbell & Thompson 2008; Welch & Goyal 2008). The Clark-West (2007) test accounts "
+        "for finite-sample parameter estimation noise under the null to determine whether "
+        "positive OOS R² reflects genuine predictive ability. All statistics are loaded "
+        "directly from canonical project evaluation outputs and are not recalculated in Streamlit.\n\n"
+        "**Multiple Testing Multiplicity Control:** All five candidate models (ARIMA-AIC, VAR-AIC, "
+        "VECM (6-var), LSTM, and XGBoost) are jointly evaluated under a unified primary hypothesis testing "
+        "battery (m = 15 total hypotheses across 3 horizons, m = 5 tests per horizon) using Benjamini-Hochberg (1995) "
+        "False Discovery Rate control. XGBoost is incorporated into the primary research scope to provide a balanced "
+        "comparison between classical econometric specifications, tabular machine learning, and deep learning (LSTM)."
     )
 
 
@@ -898,8 +938,11 @@ with tab_decision:
             "Strongest Clark-West",
             f"p = {strongest_cw['cw_p_value']:.4f}",
         )
+        r2_info = ""
+        if "r2_oos" in strongest_cw and pd.notna(strongest_cw["r2_oos"]):
+            r2_info = f" | OOS R²: {strongest_cw['r2_oos'] * 100:+.2f}%"
         st.caption(
-            f"Model: {strongest_cw['model']}"
+            f"Model: {strongest_cw['model']}{r2_info}"
         )
 
     with col4:
@@ -912,28 +955,48 @@ with tab_decision:
         f"Decision at the {horizon}-Day Horizon"
     )
 
+    r2_vals = cw_horizon["r2_oos"].dropna()
+    r2_min_str = f"{r2_vals.min() * 100:+.2f}%" if not r2_vals.empty else "N/A"
+    r2_max_str = f"{r2_vals.max() * 100:+.2f}%" if not r2_vals.empty else "N/A"
+
+    strongest_model = strongest_cw["model"]
+    strongest_cw_val = f"{strongest_cw['cw_stat']:.3f}"
+    strongest_p_val = f"{strongest_cw['cw_p_value']:.4f}"
+    strongest_q_val = f"{strongest_cw['cw_p_adj_horizon']:.4f}"
+    strongest_r2_val = (
+        f"{strongest_cw['r2_oos'] * 100:+.2f}%"
+        if "r2_oos" in strongest_cw and pd.notna(strongest_cw["r2_oos"])
+        else "N/A"
+    )
+
     if horizon == 1:
+        r2_polarity = "negative" if (not r2_vals.empty and r2_vals.max() <= 0) else "predominantly negative"
+        if fdr_significant:
+            fdr_verdict_1 = f"Although select candidates show nominal gains, multiplicity correction confirms these are not statistically distinguishable from noise (q = {strongest_q_val} <= {ALPHA})."
+        else:
+            fdr_verdict_1 = "No candidate model demonstrates statistically reliable improvement after FDR multiplicity control."
 
         st.info(
-            """
-            The Naïve Random Walk provides the lowest common-sample
-            forecast error at the 1-day horizon. None of the more
-            complex models demonstrates statistically reliable
-            improvement after FDR correction.
+            f"""
+            The Naïve Random Walk provides the lowest point forecast error at the 1-day horizon.
+            All candidate models yield {r2_polarity} raw OOS R² ({r2_min_str} to {r2_max_str}), and {fdr_verdict_1}
 
-            **Operational conclusion:** retain the Naïve benchmark
-            for very short-term forecasting.
+            **Operational conclusion:** Retain the Naïve Random Walk benchmark for short-term daily forecasting.
             """
         )
 
     elif horizon == 5:
+        fdr_outcome_5 = (
+            f"candidate models demonstrate statistically reliable improvement after FDR correction (q = {strongest_q_val} <= {ALPHA})."
+            if fdr_significant
+            else "no candidate model demonstrates statistically reliable improvement after FDR correction."
+        )
 
         st.info(
-            """
+            f"""
             The Naïve Random Walk remains the strongest common-sample
-            benchmark at the 5-day horizon. LSTM is comparatively close,
-            but no candidate model demonstrates statistically reliable
-            improvement after FDR correction.
+            benchmark at the 5-day horizon. {strongest_model} is comparatively close
+            (raw OOS R² = {strongest_r2_val}), but {fdr_outcome_5}
 
             **Operational conclusion:** additional model complexity is
             not justified at this horizon based on the available evidence.
@@ -941,20 +1004,29 @@ with tab_decision:
         )
 
     else:
+        best_rmse_model = best_rmse_row["model"]
+        r2_direction = "a positive" if (pd.notna(strongest_cw.get("r2_oos")) and strongest_cw["r2_oos"] > 0) else "a"
+        fdr_verdict_text = (
+            "The Clark-West result remains significant"
+            if fdr_significant
+            else "However, the Clark-West result does not remain significant"
+        )
+        fdr_cmp = "<=" if fdr_significant else ">"
 
         st.info(
-            """
-            VECM provides the lowest RMSE and MAE on the common 20-day
-            evaluation sample and produces the strongest raw Clark-West
-            evidence against the Naïve benchmark.
+            f"""
+            {best_rmse_model} provides the lowest point-forecast error (RMSE) on the common 20-day
+            evaluation sample. Across the candidate battery, {strongest_model} produces the strongest
+            raw Clark-West evidence against the Naïve benchmark (CW = {strongest_cw_val}, raw p = {strongest_p_val}),
+            generating {r2_direction} raw OOS R² of {strongest_r2_val}.
 
-            However, the Clark-West result does not remain significant
-            after horizon-level FDR correction.
+            {fdr_verdict_text}
+            after horizon-level FDR correction (q = {strongest_q_val} {fdr_cmp} {ALPHA}).
 
-            **Operational conclusion:** VECM is the most promising
+            **Operational conclusion:** {strongest_model} is the most promising
             longer-horizon candidate, but the Naïve Random Walk remains
-            the more defensible operational benchmark until the VECM
-            improvement is validated more robustly.
+            the more defensible operational benchmark until the improvement
+            is validated more robustly.
             """
         )
 

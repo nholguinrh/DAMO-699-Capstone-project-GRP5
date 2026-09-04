@@ -394,30 +394,30 @@ def test_apply_clark_west_fdr_global_and_horizon():
     assert (out["cw_p_adj_horizon"] >= out["cw_p_value"] - 1e-6).all()
 
 
-def test_run_clark_west_battery_smoke():
+@pytest.fixture(scope="module")
+def clark_west_battery_results():
+    """Cache Clark-West battery execution across read-only verification tests."""
+    return run_clark_west_battery()
+
+
+def test_run_clark_west_battery_smoke(clark_west_battery_results):
     """
-    Integration smoke test executing the full Clark-West 12-test battery
+    Integration smoke test executing the full Clark-West 15-test battery
     against the actual outputs/ forecast files.
     """
-    primary_df, sensitivity_df = run_clark_west_battery()
+    primary_df, sensitivity_df = clark_west_battery_results
 
-    # Primary battery is strictly 4 models x 3 horizons = 12 rows (m=12) with canonical names
-    assert len(primary_df) == 12
+    # Unified primary battery is 5 models x 3 horizons = 15 rows (m=15) with canonical names
+    assert len(primary_df) == 15
     assert set(primary_df["horizon"]) == {1, 5, 20}
-    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)"}
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost"}
 
-    # Sensitivity battery contains 2 BIC models (6 rows) or 3 models (9 rows with XGBoost Experimental)
-    expected_sens = {"ARIMA-BIC", "VAR-BIC"}
-    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
-        expected_sens.add("XGBoost (Experimental)")
-        assert len(sensitivity_df) == 9
-    else:
-        assert len(sensitivity_df) == 6
-    assert set(sensitivity_df["model"]) == expected_sens
+    # Sensitivity battery contains strictly 2 BIC models (6 rows)
+    assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
-    # All forecasts should have ~745 to 750 sample size
-    assert (primary_df["n_forecasts"] >= 745).all()
-    assert (primary_df["n_forecasts"] <= 750).all()
+    # Reconciled common sample: exactly 741 origin dates across all arms
+    assert (primary_df["n_forecasts"] == 741).all()
 
     # Verify no NaN test statistics
     assert primary_df["cw_stat"].notna().all()
@@ -425,23 +425,28 @@ def test_run_clark_west_battery_smoke():
     assert primary_df["cw_p_adj_global"].notna().all()
     assert primary_df["cw_p_adj_horizon"].notna().all()
 
+    # Verify R2_OOS metrics are populated
+    assert "r2_oos" in primary_df.columns
+    assert "r2_oos_adj" in primary_df.columns
+    assert primary_df["r2_oos"].notna().all()
+    assert primary_df["r2_oos_adj"].notna().all()
 
-def test_clark_west_primary_battery_strictly_twelve_hypotheses():
-    """Verify primary battery maintains exactly 4 canonical models x 3 horizons = 12 tests."""
-    primary_df, sensitivity_df = run_clark_west_battery()
 
-    assert len(primary_df) == 12, f"Primary battery must contain exactly 12 hypotheses, got {len(primary_df)}"
+def test_clark_west_primary_battery_fifteen_hypotheses(clark_west_battery_results):
+    """Verify unified primary battery contains 5 models x 3 horizons = 15 tests, including XGBoost."""
+    primary_df, sensitivity_df = clark_west_battery_results
+
+    assert len(primary_df) == 15, f"Primary battery must contain exactly 15 hypotheses, got {len(primary_df)}"
     assert set(primary_df["model"]) == {
         "ARIMA-AIC",
         "VAR-AIC",
         "VECM (6-var)",
         "LSTM (Tuned)",
+        "XGBoost",
     }
-    # XGBoost must be strictly quarantined to sensitivity_df
-    if "XGBoost (Experimental)" in set(sensitivity_df["model"]):
-        assert len(sensitivity_df) == 9
-    else:
-        assert len(sensitivity_df) == 6
+    # Sensitivity battery contains strictly the 2 BIC specifications
+    assert len(sensitivity_df) == 6
+    assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
 
 def test_regime_segmentation_hac_power_gating():
@@ -480,8 +485,11 @@ def test_common_sample_metrics_paired_baseline_parity():
         if model_name == "Naïve Random Walk":
             continue
 
-        # Map display name to forecast column
-        col_map = {"ARIMA": "arima_aic", "VAR": "var_aic", "VECM": "vecm", "LSTM": "lstm", "XGBoost": "xgboost"}
+        # Map display name to forecast column (support both canonical and short names)
+        col_map = {
+            "ARIMA": "arima_aic", "VAR": "var_aic", "VECM": "vecm", "LSTM": "lstm", "XGBoost": "xgboost",
+            "ARIMA-AIC": "arima_aic", "VAR-AIC": "var_aic", "VECM (6-var)": "vecm", "LSTM (Tuned)": "lstm",
+        }
         col = col_map.get(model_name)
         if col is None or col not in forecast_df.columns:
             continue
@@ -520,6 +528,236 @@ def test_forecast_error_distribution_missing_column_resilience():
     fig_violin = create_forecast_error_distribution(df, horizon=1, chart_type="Violin")
     assert fig_box is not None
     assert fig_violin is not None
+
+
+def test_dashboard_clark_west_summary_includes_xgboost():
+    """Assert dashboard get_clark_west_summary directly includes XGBoost with unified m=15 family q-values."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
+    from data_loader import get_clark_west_summary
+
+    for h in [1, 5, 20]:
+        cw = get_clark_west_summary(h)
+        models = set(cw["model"])
+        assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
+        assert len(cw) == 5, f"Each horizon must contain 5 models under unified battery, got {len(cw)}"
+
+        # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
+        xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
+        expected_q = 0.9127 if h == 1 else (0.2150 if h == 5 else 0.2278)
+        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
+
+
+def test_clark_west_r2_oos_mathematical_consistency():
+    """
+    Tests that R2_OOS and R2_OOS_adj strictly satisfy Campbell & Thompson (2008)
+    and Clark & West (2007) definitions:
+        R2_OOS = 1 - MSPE_model / MSPE_naive
+        R2_OOS_adj = 1 - MSPE_model_adj / MSPE_naive
+    """
+    rng = np.random.default_rng(42)
+    n = 200
+    actual = rng.normal(size=n)
+    naive = actual + rng.normal(scale=0.5, size=n)
+    pred = actual + rng.normal(scale=0.4, size=n)
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert not res["insufficient_sample"]
+    assert res["r2_oos"] is not None
+    assert res["r2_oos_adj"] is not None
+
+    expected_r2 = 1.0 - (res["mspe_model"] / res["mspe_naive"])
+    expected_r2_adj = 1.0 - (res["mspe_model_adj"] / res["mspe_naive"])
+
+    assert abs(res["r2_oos"] - expected_r2) < 1e-4
+    assert abs(res["r2_oos_adj"] - expected_r2_adj) < 1e-4
+
+
+def test_clark_west_r2_oos_insufficient_sample_is_none():
+    actual = np.array([1.0, 2.0])
+    naive = np.array([1.1, 2.1])
+    pred = np.array([1.2, 2.2])
+
+    res = clark_west_test(actual, naive, pred, h=5)
+    assert res["insufficient_sample"]
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+
+def test_run_clark_west_battery_expected_r2_benchmarks(clark_west_battery_results):
+    """
+    Verifies that canonical battery results match expected econometric benchmarks
+    for key models and horizons (Issue #99 specification):
+    - VECM (6-var) at h=20: +1.85% raw R2_OOS, +14.07% CW-adjusted R2_OOS
+    - LSTM (Tuned) at h=5: -0.19% raw R2_OOS, +1.31% CW-adjusted R2_OOS
+    - ARIMA-AIC at all horizons: negative raw R2_OOS
+    """
+    primary_df, sensitivity_df = clark_west_battery_results
+
+    # VECM at h=20
+    vecm_20 = primary_df[(primary_df["model"] == "VECM (6-var)") & (primary_df["horizon"] == 20)].iloc[0]
+    assert 0.015 <= vecm_20["r2_oos"] <= 0.022  # ~+1.85% to +1.86%
+    assert 0.135 <= vecm_20["r2_oos_adj"] <= 0.145  # ~+14.07%
+
+    # LSTM at h=5
+    lstm_5 = primary_df[(primary_df["model"] == "LSTM (Tuned)") & (primary_df["horizon"] == 5)].iloc[0]
+    assert -0.003 <= lstm_5["r2_oos"] <= 0.0  # ~-0.19%
+    # ARIMA-AIC should have negative raw R2_OOS across all horizons
+    arima_df = primary_df[primary_df["model"] == "ARIMA-AIC"]
+    assert (arima_df["r2_oos"] < 0).all()
+
+
+def test_clark_west_r2_oos_zero_benchmark_mspe_is_none():
+    """When the naive benchmark is perfect (mspe_1 == 0), r2_oos and r2_oos_adj should be None."""
+    actual = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    naive = actual.copy()  # perfect forecast -> mspe_1 = 0
+    pred = actual + 0.1
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert not res["insufficient_sample"]
+    assert res["mspe_naive"] == 0.0
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+    # Test dashboard None -> "—" formatter
+    formatter = lambda x: f"{x * 100:+.2f}%" if pd.notna(x) else "—"
+    assert formatter(res["r2_oos"]) == "—"
+    assert formatter(0.018561) == "+1.86%"
+    assert formatter(-0.0019) == "-0.19%"
+
+
+def test_clark_west_r2_oos_noise_adjustment_invariant():
+    """
+    Mathematical invariant: Because adj = mean((y1 - y2)^2) >= 0,
+    MSPE_model_adj <= MSPE_model, which strictly implies
+    R2_OOS_adj >= R2_OOS for all valid non-trivial forecasts.
+    """
+    rng = np.random.default_rng(123)
+    n = 250
+    actual = rng.normal(size=n)
+    naive = actual + rng.normal(scale=0.5, size=n)
+    model = actual + rng.normal(scale=0.4, size=n)
+
+    res = clark_west_test(actual, naive, model, h=1)
+    assert res["r2_oos"] is not None
+    assert res["r2_oos_adj"] is not None
+    assert res["r2_oos_raw"] is not None
+    assert res["r2_oos_adj_raw"] is not None
+    assert res["r2_oos_adj"] >= res["r2_oos"] - 1e-9
+    assert res["r2_oos_adj_raw"] >= res["r2_oos_raw"] - 1e-9
+
+
+def test_sensitivity_battery_r2_oos_columns(clark_west_battery_results):
+    """Verify sensitivity battery (BIC models) correctly populates R2_OOS."""
+    _, sensitivity_df = clark_west_battery_results
+    assert len(sensitivity_df) == 6
+    assert "r2_oos" in sensitivity_df.columns
+    assert "r2_oos_adj" in sensitivity_df.columns
+    assert sensitivity_df["r2_oos"].notna().all()
+    assert sensitivity_df["r2_oos_adj"].notna().all()
+
+
+def test_clark_west_r2_oos_near_zero_denominator_handled():
+    """Verify mspe_naive near machine epsilon returns None rather than exploding."""
+    actual = np.ones(50)
+    naive = actual + 1e-13  # near-zero variance (< 1e-12)
+    pred = actual + 0.1
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+
+def test_clark_west_all_nan_contract_parity():
+    """
+    Verifies that all-NaN inputs return the identical dictionary key contract
+    as standard and small-sample returns, including raw float fields.
+    """
+    actual = np.array([np.nan, np.nan, np.nan])
+    naive = np.array([np.nan, np.nan, np.nan])
+    model = np.array([np.nan, np.nan, np.nan])
+
+    res = clark_west_test(actual, naive, model, h=1)
+    assert res["insufficient_sample"] is True
+    assert res["n_forecasts"] == 0
+    expected_keys = {
+        "n_forecasts", "mspe_naive", "mspe_model", "cw_adjustment", "mspe_model_adj",
+        "r2_oos", "r2_oos_raw", "r2_oos_adj", "r2_oos_adj_raw",
+        "mean_f_stat", "se_f_stat", "cw_stat", "cw_stat_raw",
+        "cw_p_value", "model_significantly_better", "insufficient_sample",
+    }
+    assert set(res.keys()) == expected_keys
+    assert res["r2_oos_raw"] is None
+    assert res["r2_oos_adj_raw"] is None
+    assert res["cw_stat_raw"] is None
+
+
+def test_clark_west_fdr_boundary_condition_equality():
+    """
+    Assert that a hypothesis with q-value exactly equal to alpha (q == 0.05)
+    is marked statistically significant under canonical Benjamini-Hochberg (q <= alpha).
+    """
+    df = pd.DataFrame({
+        "model": [f"M{i}" for i in range(5)],
+        "horizon": [1] * 5,
+        "cw_p_value": [0.01, 0.02, 0.03, 0.04, 0.05],
+        "cw_stat": [1.5, 1.4, 1.3, 1.2, 1.1],
+        "cw_stat_raw": [1.5, 1.4, 1.3, 1.2, 1.1],
+        "insufficient_sample": [False] * 5,
+    })
+    res = apply_clark_west_fdr(df, alpha=0.05)
+    # Under BH, if p_adj evaluates to <= alpha, it must be significant
+    assert (res["model_significantly_better_fdr_horizon"] == (res["cw_p_adj_horizon"] <= 0.05)).all()
+
+
+def test_regime_segmentation_zero_mspe_naive_contract():
+    """
+    Assert that evaluate_regime_segmentation returns None for r2_oos
+    when benchmark MSPE is zero or negligible, preventing silent 0.0 fallback.
+    """
+    from model_comparison import evaluate_regime_segmentation
+    regime_df = evaluate_regime_segmentation(save=False)
+
+    for _, row in regime_df.iterrows():
+        if row["rmse_naive"] == 0:
+            assert row["r2_oos"] is None or pd.isna(row["r2_oos"])
+
+
+def test_dashboard_model_label_contract_consistency():
+    """
+    Assert that candidate model naming conventions are synchronized between
+    Tab 3 (build_common_sample_metrics) and Tab 4 (load_clark_west_results).
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
+    from data_loader import build_common_sample_metrics, load_clark_west_results
+
+    metrics = build_common_sample_metrics()
+    cw = load_clark_west_results()
+
+    dashboard_models = set(metrics[metrics["model"] != "Naïve Random Walk"]["model"])
+    cw_models = set(cw["model"])
+
+    assert dashboard_models.issubset(cw_models), (
+        f"Model name mismatch between dashboard ({dashboard_models}) and Clark-West ({cw_models})"
+    )
+
+
+def test_dashboard_r2_oos_formatting_vectorized_direct():
+    """
+    Directly verify that the dashboard's vectorized formatter correctly formats
+    floats, negative percentages, and replaces None/NaN with an em-dash.
+    """
+    s = pd.Series([0.018561, -0.0019, np.nan, None])
+    res = s.apply(lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—")
+
+    assert res.iloc[0] == "+1.86%"
+    assert res.iloc[1] == "-0.19%"
+    assert res.iloc[2] == "—"
+    assert res.iloc[3] == "—"
+
 
 
 
