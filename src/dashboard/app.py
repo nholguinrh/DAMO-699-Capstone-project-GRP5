@@ -129,6 +129,31 @@ uncertainty_interval = st.sidebar.radio(
     help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
 )
 
+st.sidebar.divider()
+st.sidebar.subheader("Forecast Origin Date Range")
+
+_min_origin_date = forecast_df["origin_date"].min().date()
+_max_origin_date = forecast_df["origin_date"].max().date()
+
+origin_date_range = st.sidebar.slider(
+    "Forecast origin date range",
+    min_value=_min_origin_date,
+    max_value=_max_origin_date,
+    value=(_min_origin_date, _max_origin_date),
+    format="YYYY-MM-DD",
+    key="origin_date_range",
+    help=(
+        "Restricts the Forecasts vs. Actuals (Tab 3) and Forecast Error "
+        "Distribution (Tab 5) charts to forecast origins within this window."
+    ),
+)
+
+_range_start, _range_end = origin_date_range
+filtered_forecast_df = forecast_df[
+    (forecast_df["origin_date"] >= pd.Timestamp(_range_start))
+    & (forecast_df["origin_date"] <= pd.Timestamp(_range_end))
+]
+
 
 
 # =========================================================
@@ -687,21 +712,29 @@ with tab_performance:
 
     st.subheader("Forecasts vs Actuals")
 
-    forecast_fig = create_forecast_vs_actual_chart(
-        forecast_df,
-        horizon=horizon,
-        selected_models=selected_models,
-        uncertainty_interval=uncertainty_interval,
-    )
+    if filtered_forecast_df[filtered_forecast_df["horizon"] == horizon].empty:
+        st.warning(
+            f"No forecast origins between {_range_start:%Y-%m-%d} and "
+            f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
+            "Widen the date range in the sidebar."
+        )
+    else:
+        forecast_fig = create_forecast_vs_actual_chart(
+            filtered_forecast_df,
+            horizon=horizon,
+            selected_models=selected_models,
+            uncertainty_interval=uncertainty_interval,
+        )
 
-    st.plotly_chart(
-        forecast_fig,
-        use_container_width=True,
-    )
+        st.plotly_chart(
+            forecast_fig,
+            use_container_width=True,
+        )
 
     st.caption(
         f"Cross-model comparisons use the {pipeline_metadata['common_origins_per_horizon']} forecast origins "
-        "shared simultaneously across the core models and available benchmarks."
+        "shared simultaneously across the core models and available benchmarks, "
+        f"filtered to {_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}."
     )
 
     if regime_metrics_df is not None:
@@ -879,23 +912,31 @@ with tab_errors:
         horizontal=True,
     )
 
-    error_fig = (
-        create_forecast_error_distribution(
-            forecast_df,
-            horizon=horizon,
-            chart_type=error_chart_type,
+    if filtered_forecast_df[filtered_forecast_df["horizon"] == horizon].empty:
+        st.warning(
+            f"No forecast origins between {_range_start:%Y-%m-%d} and "
+            f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
+            "Widen the date range in the sidebar."
         )
-    )
+    else:
+        error_fig = (
+            create_forecast_error_distribution(
+                filtered_forecast_df,
+                horizon=horizon,
+                chart_type=error_chart_type,
+            )
+        )
 
-    st.plotly_chart(
-        error_fig,
-        use_container_width=True,
-    )
+        st.plotly_chart(
+            error_fig,
+            use_container_width=True,
+        )
 
     st.caption(
         "Forecast error = Actual − Forecast. "
         "Distributions help reveal bias, dispersion, "
-        "and extreme forecast errors."
+        "and extreme forecast errors. "
+        f"Filtered to {_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}."
     )
 
 
