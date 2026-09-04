@@ -428,11 +428,15 @@ def write_mapping(
     target_end: str | datetime | None = None,
 ) -> None:
     end = _coerce_target_end(target_end)
+    # Never truncate release dates the fetch already found beyond `end` -- a
+    # narrower target_end than a previous run must not delete forward-known
+    # release dates from the CSV.
+    effective_end = max(end, max(mapping.keys())) if mapping else end
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("reference_month,release_date\n")
         for ref_month in sorted(mapping):
-            if TARGET_START <= ref_month <= end:
+            if TARGET_START <= ref_month <= effective_end:
                 f.write(f"{ref_month:%Y-%m-01},{mapping[ref_month]:%Y-%m-%d}\n")
 
 

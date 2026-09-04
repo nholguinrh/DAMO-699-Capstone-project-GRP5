@@ -191,6 +191,7 @@ if st.sidebar.button(
     use_container_width=True,
 ):
     st.session_state["pipeline_running"] = True
+    _report = None
     try:
         with st.status(
             "Running Path A pipeline…",
@@ -252,8 +253,9 @@ if st.sidebar.button(
     # On error, keep the expanded st.status box (with the per-source failure
     # detail) on screen -- an st.rerun() here would wipe it and leave only the
     # 🔴 sidebar badge. On success / warning the rerun refreshes the dashboard
-    # against the freshly rebuilt data.
-    if _report["status"] != "error":
+    # against the freshly rebuilt data. _report stays None if run_pipeline()
+    # raised before returning, so guard against that too.
+    if _report is not None and _report["status"] != "error":
         st.rerun()
 
 st.sidebar.caption(
