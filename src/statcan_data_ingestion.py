@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from http_utils import get_with_retry
+from pipeline_dates import CPI_REFERENCE_START, clamp_to_range, resolve_date_range
 from project_paths import PROJECT_ROOT, PROCESSED_DIR, RAW_DIR
 
 
@@ -55,15 +56,15 @@ BASE_URL = (
 
 VECTOR_ID = "41690973"
 
-START_DATE = "2009-01-01"
-END_DATE = "2026-06-30"
-
 
 # ---------------------------------------------------------
 # 3. Download raw CPI data
 # ---------------------------------------------------------
 
-def download_raw_data() -> Path:
+def download_raw_data(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Path:
     """
     Download Statistics Canada CPI observations using the
     Web Data Service API.
@@ -71,16 +72,26 @@ def download_raw_data() -> Path:
     The HTTP request uses synchronous retry logic supplied by
     get_with_retry().
 
+    Parameters
+    ----------
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the reference-period
+        window. Default to ``config.CPI_REFERENCE_START`` / ``config.DATE_END``.
+
     Returns
     -------
     Path
         Location of the saved raw JSON file.
     """
 
+    start, end = resolve_date_range(
+        start_date, end_date, default_start=CPI_REFERENCE_START
+    )
+
     params = {
         "vectorIds": VECTOR_ID,
-        "startRefPeriod": START_DATE,
-        "endReferencePeriod": END_DATE,
+        "startRefPeriod": start,
+        "endReferencePeriod": end,
     }
 
     print(
@@ -765,6 +776,8 @@ def save_processed_data(
 def run(
     use_cache: bool = False,
     cache_file: Path | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
     """
     Run the complete Statistics Canada CPI pipeline.
@@ -778,6 +791,14 @@ def run(
     cache_file:
         Optional path to a specific cached raw JSON file.
 
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the reference-period window.
+        Default to ``config.CPI_REFERENCE_START`` / ``config.DATE_END``. CPI
+        reference months are clamped to this range; ``use_cache=True`` cannot
+        extend past what is cached. Extending ``end_date`` past the coverage of
+        ``config/cpi_release_dates.csv`` requires refreshing that file first
+        (see ``build_cpi_release_dates.py``).
+
     Returns
     -------
     pandas.DataFrame
@@ -785,9 +806,13 @@ def run(
     """
 
     pipeline_start = time.perf_counter()
+    start, end = resolve_date_range(
+        start_date, end_date, default_start=CPI_REFERENCE_START
+    )
 
     print("\n" + "=" * 60)
     print("STATISTICS CANADA CPI DATA INGESTION")
+    print(f"Window: {start} to {end}")
     print("=" * 60)
 
     if use_cache:
@@ -803,11 +828,13 @@ def run(
             print(raw_file)
 
     else:
-        raw_file = download_raw_data()
+        raw_file = download_raw_data(start_date=start, end_date=end)
 
     data = load_raw_json(raw_file)
 
     cpi_df = create_cpi_dataframe(data)
+
+    cpi_df = clamp_to_range(cpi_df, "reference_month", start, end)
 
     release_df = load_release_date_mapping()
 
@@ -875,6 +902,18 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--start-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) start of the reference-period window. Defaults to config.CPI_REFERENCE_START.",
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) end of the reference-period window. Defaults to config.DATE_END.",
+    )
+
     return parser.parse_args()
 
 
@@ -898,4 +937,6 @@ if __name__ == "__main__":
     run(
         use_cache=arguments.from_cache,
         cache_file=arguments.cache_file,
+        start_date=arguments.start_date,
+        end_date=arguments.end_date,
     )

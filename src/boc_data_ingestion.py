@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from http_utils import get_with_retry
+from pipeline_dates import clamp_to_range, resolve_date_range
 from project_paths import PROCESSED_DIR, RAW_DIR
 
 
@@ -23,9 +24,6 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 # ---------------------------------------------------------
 # 2. API configuration
 # ---------------------------------------------------------
-
-START_DATE = "2009-01-02"
-END_DATE = "2026-06-30"
 
 BASE_URL = (
     "https://www.bankofcanada.ca/"
@@ -56,15 +54,26 @@ PROCESSED_FILE = (
 # 3. Download raw data
 # ---------------------------------------------------------
 
-def download_raw_data() -> Path:
+def download_raw_data(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Path:
     """
     Download Bank of Canada data sequentially using the Valet API.
+
+    Parameters
+    ----------
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the request window.
+        Default to ``config.DATE_START`` / ``config.DATE_END``.
 
     Returns
     -------
     Path
         Path to the cached raw JSON file.
     """
+
+    start, end = resolve_date_range(start_date, end_date)
 
     series_names = ",".join(SERIES_IDS.keys())
 
@@ -73,8 +82,8 @@ def download_raw_data() -> Path:
     )
 
     params = {
-        "start_date": START_DATE,
-        "end_date": END_DATE,
+        "start_date": start,
+        "end_date": end,
     }
 
     print("Connecting to the Bank of Canada Valet API...")
@@ -459,6 +468,8 @@ def save_processed_data(
 def run(
     use_cache: bool = False,
     cache_file: Path | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
     """
     Run the complete Bank of Canada ingestion pipeline.
@@ -472,6 +483,12 @@ def run(
     cache_file:
         Optional path to a specific cached JSON file.
 
+    start_date, end_date:
+        Optional ISO (YYYY-MM-DD) overrides for the ingestion window.
+        Default to ``config.DATE_START`` / ``config.DATE_END``. The final
+        dataset is clamped to this range, so ``use_cache=True`` also honours
+        a narrower ``end_date`` (it cannot extend past what is cached).
+
     Returns
     -------
     pandas.DataFrame
@@ -479,9 +496,11 @@ def run(
     """
 
     pipeline_start = time.perf_counter()
+    start, end = resolve_date_range(start_date, end_date)
 
     print("\n" + "=" * 60)
     print("BANK OF CANADA DATA INGESTION")
+    print(f"Window: {start} to {end}")
     print("=" * 60)
 
     if use_cache:
@@ -495,13 +514,15 @@ def run(
             print(raw_file)
 
     else:
-        raw_file = download_raw_data()
+        raw_file = download_raw_data(start_date=start, end_date=end)
 
     data = load_raw_json(raw_file)
 
     df = create_dataframe(data)
 
     df = clean_dataframe(df)
+
+    df = clamp_to_range(df, "date", start, end)
 
     validate_dataframe(df)
 
@@ -561,6 +582,18 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--start-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) start of the ingestion window. Defaults to config.DATE_START.",
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="ISO (YYYY-MM-DD) end of the ingestion window. Defaults to config.DATE_END.",
+    )
+
     return parser.parse_args()
 
 
@@ -584,4 +617,6 @@ if __name__ == "__main__":
     run(
         use_cache=arguments.from_cache,
         cache_file=arguments.cache_file,
+        start_date=arguments.start_date,
+        end_date=arguments.end_date,
     )

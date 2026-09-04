@@ -21,9 +21,17 @@ except ImportError:
     pass
 
 
-# ── Date range (proposal §4.1: Jan 2, 2009 – Jun 30, 2026) ──────────────────
+# ── Pipeline date range (proposal §4.1: Jan 2, 2009 – Jun 30, 2026) ─────────
+# Single source of truth for the ingestion window (Path A and Path B). These
+# are defaults only: every Path A run() accepts start_date / end_date overrides
+# (see src/pipeline_dates.py) and src/run_data_collection.py exposes
+# --start-date / --end-date.
 DATE_START = "2009-01-02"
 DATE_END = "2026-06-30"
+
+# StatCan CPI reference periods are month-aligned; its window opens one day
+# before DATE_START so that 2009-01 is captured as a reference month.
+CPI_REFERENCE_START = "2009-01-01"
 
 # ── Output directory ─────────────────────────────────────────────────────────
 RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
