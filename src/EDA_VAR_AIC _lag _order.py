@@ -81,7 +81,15 @@ warnings.filterwarnings("ignore", category=Warning, module="statsmodels")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_paths import PROCESSED_DIR, PROJECT_ROOT  # noqa: E402
-from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
+from model_comparison import (  # noqa: E402
+    cumulative_var_level_interval,
+    interval_coverage_summary,
+    pairwise_dm,
+    plain_language_verdict,
+)
+
+# 90%/95% analytical prediction intervals (issue #103).
+INTERVAL_ALPHAS = (0.10, 0.05)
 
 # ----------------------------------------------------------------------------
 # Config
@@ -194,7 +202,13 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
     diff_target_idx = endog_all.columns.get_loc(target_diff_col)
 
     max_h = max(HORIZONS)
-    records = {h: {"actual": [], "var_pred": [], "naive_pred": [], "origin_date": []} for h in HORIZONS}
+    records = {
+        h: {
+            "actual": [], "var_pred": [], "naive_pred": [], "origin_date": [],
+            "lower_90": [], "upper_90": [], "lower_95": [], "upper_95": [],
+        }
+        for h in HORIZONS
+    }
 
     # Issue #63 follow-up: origin is now counted in LEVEL observations trained on
     # (train = levels.iloc[:origin], last_level/origin_date = levels.iloc[origin - 1]),
@@ -227,6 +241,14 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
         fc_target_diffs = fc[:, diff_target_idx]
         cum_fc = np.cumsum(fc_target_diffs)  # cumulative reconstructed level change
 
+        # Analytical 90%/95% half-widths for the reconstructed level at every
+        # horizon 1..max_h, from this origin's fit (issue #103). See
+        # cumulative_var_level_interval()'s docstring for why this must be the
+        # *cumulative* forecast-error covariance, not the per-step VAR MSE.
+        half_widths = cumulative_var_level_interval(
+            fitted, target_idx=diff_target_idx, max_h=max_h, alphas=INTERVAL_ALPHAS,
+        )
+
         last_level = levels[TARGET].iloc[origin - 1]
         origin_date = levels.index[origin - 1]
 
@@ -237,11 +259,17 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
             actual_level = levels[TARGET].iloc[future_pos]
             var_level_pred = last_level + cum_fc[h - 1]
             naive_level_pred = last_level  # random walk: tomorrow = today, per §5.4
+            half_90 = half_widths[0.10][h - 1]
+            half_95 = half_widths[0.05][h - 1]
 
             records[h]["actual"].append(actual_level)
             records[h]["var_pred"].append(var_level_pred)
             records[h]["naive_pred"].append(naive_level_pred)
             records[h]["origin_date"].append(origin_date)
+            records[h]["lower_90"].append(var_level_pred - half_90)
+            records[h]["upper_90"].append(var_level_pred + half_90)
+            records[h]["lower_95"].append(var_level_pred - half_95)
+            records[h]["upper_95"].append(var_level_pred + half_95)
 
     rows = []
     raw = {}  # h -> (actual, var_pred, naive_pred) arrays, for the DM test in step 5
@@ -273,10 +301,15 @@ def evaluate(levels: pd.DataFrame, diffed: pd.DataFrame, lag: int) -> tuple[pd.D
         forecast_parts.append(pd.DataFrame({
             "origin_date": records[h]["origin_date"], "horizon": h,
             "actual": actual, "var_aic": var_pred, "naive": naive_pred,
+            "lower_90": records[h]["lower_90"], "upper_90": records[h]["upper_90"],
+            "lower_95": records[h]["lower_95"], "upper_95": records[h]["upper_95"],
         }))
 
     forecasts = pd.concat(forecast_parts, ignore_index=True) if forecast_parts else pd.DataFrame(
-        columns=["origin_date", "horizon", "actual", "var_aic", "naive"]
+        columns=[
+            "origin_date", "horizon", "actual", "var_aic", "naive",
+            "lower_90", "upper_90", "lower_95", "upper_95",
+        ]
     )
     return pd.DataFrame(rows), raw, forecasts
 
@@ -390,14 +423,25 @@ def main():
         verdict = plain_language_verdict(verdict_row, "VAR", "naive")
         print(f"  h={h}: {verdict}")
 
+    interval_summary = interval_coverage_summary(
+        forecasts, actual_col="actual",
+        lower_cols={90.0: "lower_90", 95.0: "lower_95"},
+        upper_cols={90.0: "upper_90", 95.0: "upper_95"},
+    )
+    interval_summary.insert(0, "model", "VAR-AIC")
+    print("\nAnalytical 90%/95% interval coverage & width (issue #103):")
+    print(interval_summary.to_string(index=False))
+
     out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
     results.to_csv(out_dir / "r3_patha_rmse_mae_vs_naive.csv", index=False)
     dm_results.to_csv(out_dir / "r3_patha_diebold_mariano.csv", index=False)
     forecasts.to_csv(out_dir / "r3_patha_var_aic_forecasts.csv", index=False)
+    interval_summary.to_csv(out_dir / "r3_patha_var_aic_prediction_intervals.csv", index=False)
     print(f"\nSaved: {out_dir}/r3_patha_rmse_mae_vs_naive.csv, "
           f"{out_dir}/r3_patha_diebold_mariano.csv, "
-          f"{out_dir}/r3_patha_var_aic_forecasts.csv")
+          f"{out_dir}/r3_patha_var_aic_forecasts.csv, "
+          f"{out_dir}/r3_patha_var_aic_prediction_intervals.csv")
 
 
 if __name__ == "__main__":

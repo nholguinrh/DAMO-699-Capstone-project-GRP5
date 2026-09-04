@@ -48,7 +48,18 @@ warnings.filterwarnings("ignore", category=ValueWarning, module="statsmodels")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_paths import PROCESSED_DIR, PROJECT_ROOT  # noqa: E402
-from model_comparison import pairwise_dm, plain_language_verdict  # noqa: E402
+from model_comparison import (  # noqa: E402
+    interval_coverage_summary,
+    pairwise_dm,
+    plain_language_verdict,
+)
+
+# 90%/95% analytical prediction intervals (issue #103). VECM forecasts levels
+# directly (no differencing/reconstruction), so these use statsmodels'
+# native VECMResults.predict(steps, alpha=...) rather than the cumulative-MA
+# formula the differenced VAR-AIC baseline needs (see model_comparison.py's
+# cumulative_var_level_interval()).
+INTERVAL_ALPHAS = (0.10, 0.05)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -279,11 +290,18 @@ def evaluate_vecm(
     det_spec: str,
     aic_lag_diff: int,
     bic_lag_diff: int,
-) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
+) -> tuple[pd.DataFrame, dict, pd.DataFrame, pd.DataFrame]:
     """
     Expanding-window forecast evaluation matching the VAR baseline protocol.
     At each origin, all four models are evaluated on the same data so the
-    Diebold-Mariano test receives truly paired forecast errors.
+    Diebold-Mariano test receives truly paired forecast errors. Also computes
+    analytical 90%/95% prediction intervals for VECM (issue #103), via
+    statsmodels' native VECMResults.predict(steps, alpha=) -- VECM forecasts
+    levels directly, so the closed-form Sigma_h = sum Phi_i Sigma_u Phi_i.T
+    interval applies with no reconstruction step, unlike the VAR-AIC/VAR-BIC
+    baselines here (fit on differences; not given intervals in this file --
+    VAR-AIC's canonical intervals are in `EDA_VAR_AIC _lag _order.py`, the
+    source model_comparison.py actually reads for the cross-model VAR-AIC arm).
 
     Parameters
     ----------
@@ -304,8 +322,11 @@ def evaluate_vecm(
 
     Returns
     -------
-    tuple[pd.DataFrame, dict]
-        Metrics summary DataFrame and dict of raw arrays keyed by horizon.
+    tuple[pd.DataFrame, dict, pd.DataFrame, pd.DataFrame]
+        Metrics summary DataFrame, dict of raw arrays keyed by horizon,
+        per-origin forecasts (with VECM's interval bound columns), and the
+        VECM interval coverage/width summary (empty DataFrame if no origins
+        were evaluated).
     """
     target_idx = list(levels.columns).index(TARGET)
     target_diff_col = f"d_{TARGET}"
@@ -313,7 +334,10 @@ def evaluate_vecm(
 
     max_h = max(HORIZONS)
     records = {
-        h: {"actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": [], "origin_date": []}
+        h: {
+            "actual": [], "vecm": [], "var_aic": [], "var_bic": [], "naive": [], "origin_date": [],
+            "lower_90": [], "upper_90": [], "lower_95": [], "upper_95": [],
+        }
         for h in HORIZONS
     }
 
@@ -325,13 +349,19 @@ def evaluate_vecm(
         train_levels = levels.iloc[:origin]
         last_level = float(train_levels[TARGET].iloc[-1])
 
-        # -- VECM forecast (returns levels directly) --
+        # -- VECM forecast (returns levels directly, so no cumsum reconstruction
+        #    is needed -- statsmodels' native predict(steps, alpha=) already
+        #    gives the exact Sigma_h = sum_{i=0}^{h-1} Phi_i Sigma_u Phi_i.T
+        #    analytical interval for the level series (issue #103). Two calls
+        #    (one per nominal level) since predict() takes a single alpha; the
+        #    alpha=0.10 call's point forecast is reused as vecm_fc. --
         try:
             vecm_fit = VECM(
                 train_levels, k_ar_diff=k_ar_diff,
                 coint_rank=coint_rank, deterministic=det_spec,
             ).fit()
-            vecm_fc = vecm_fit.predict(steps=max_h)  # (max_h, n_vars) in levels
+            vecm_fc, vecm_lo_90, vecm_hi_90 = vecm_fit.predict(steps=max_h, alpha=0.10)
+            _, vecm_lo_95, vecm_hi_95 = vecm_fit.predict(steps=max_h, alpha=0.05)
         except (ValueError, np.linalg.LinAlgError, IndexError):
             n_failed += 1
             continue
@@ -382,6 +412,10 @@ def evaluate_vecm(
             records[h]["var_bic"].append(last_level + float(var_bic_cum_target[h - 1]))
             records[h]["naive"].append(last_level)
             records[h]["origin_date"].append(origin_date)
+            records[h]["lower_90"].append(float(vecm_lo_90[h - 1, target_idx]))
+            records[h]["upper_90"].append(float(vecm_hi_90[h - 1, target_idx]))
+            records[h]["lower_95"].append(float(vecm_lo_95[h - 1, target_idx]))
+            records[h]["upper_95"].append(float(vecm_hi_95[h - 1, target_idx]))
 
         n_origins += 1
         if n_origins % 100 == 0:
@@ -436,12 +470,27 @@ def evaluate_vecm(
         forecast_parts.append(pd.DataFrame({
             "origin_date": records[h]["origin_date"], "horizon": h,
             "actual": a, "vecm": v, "var_aic": va, "var_bic": vb, "naive": nv,
+            "vecm_lower_90": records[h]["lower_90"], "vecm_upper_90": records[h]["upper_90"],
+            "vecm_lower_95": records[h]["lower_95"], "vecm_upper_95": records[h]["upper_95"],
         }))
 
     forecasts = pd.concat(forecast_parts, ignore_index=True) if forecast_parts else pd.DataFrame(
-        columns=["origin_date", "horizon", "actual", "vecm", "var_aic", "var_bic", "naive"]
+        columns=[
+            "origin_date", "horizon", "actual", "vecm", "var_aic", "var_bic", "naive",
+            "vecm_lower_90", "vecm_upper_90", "vecm_lower_95", "vecm_upper_95",
+        ]
     )
-    return pd.DataFrame(rows), raw, forecasts
+
+    interval_summary = pd.DataFrame()
+    if not forecasts.empty:
+        interval_summary = interval_coverage_summary(
+            forecasts, actual_col="actual",
+            lower_cols={90.0: "vecm_lower_90", 95.0: "vecm_lower_95"},
+            upper_cols={90.0: "vecm_upper_90", 95.0: "vecm_upper_95"},
+        )
+        interval_summary.insert(0, "model", "VECM (6-var)")
+
+    return pd.DataFrame(rows), raw, forecasts, interval_summary
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +588,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
         "eval_metrics": None,
         "eval_raw": None,
         "eval_forecasts": None,
+        "eval_interval_summary": None,
         "dm_results": None,
     }
 
@@ -568,7 +618,7 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
     # -- Step 6: Expanding-window evaluation --
     print(f"\n[6/7] Expanding-window evaluation "
           f"(MIN_TRAIN={MIN_TRAIN}, STEP={STEP}, h={HORIZONS})...")
-    eval_metrics, eval_raw, eval_forecasts = evaluate_vecm(
+    eval_metrics, eval_raw, eval_forecasts, eval_interval_summary = evaluate_vecm(
         levels=levels,
         diffed=diffed,
         k_ar_diff=k_ar_diff,
@@ -578,9 +628,13 @@ def run_pipeline(feature_set: list[str], label: str, enforce_i1: bool = True) ->
         bic_lag_diff=bic_lag_diff,
     )
     print("\n" + eval_metrics.to_string(index=False))
+    if not eval_interval_summary.empty:
+        print("\nAnalytical 90%/95% interval coverage & width (issue #103):")
+        print(eval_interval_summary.to_string(index=False))
     result["eval_metrics"] = eval_metrics
     result["eval_raw"] = eval_raw
     result["eval_forecasts"] = eval_forecasts
+    result["eval_interval_summary"] = eval_interval_summary
 
     # -- Step 7: Diebold-Mariano tests --
     print(f"\n[7/7] Diebold-Mariano significance tests (4-way comparison)...")
@@ -691,6 +745,13 @@ def main():
     if r6["eval_forecasts"] is not None and not r6["eval_forecasts"].empty:
         r6["eval_forecasts"].to_csv(out_dir / "r3_vecm_6var_forecasts.csv", index=False)
         print("  -> r3_vecm_6var_forecasts.csv")
+
+    # VECM prediction-interval coverage/width summary (issue #103), 6-var system.
+    if r6["eval_interval_summary"] is not None and not r6["eval_interval_summary"].empty:
+        r6["eval_interval_summary"].to_csv(
+            out_dir / "r3_vecm_prediction_intervals.csv", index=False,
+        )
+        print("  -> r3_vecm_prediction_intervals.csv")
 
     # Summary
     print(f"\n{'=' * 70}")

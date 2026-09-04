@@ -260,6 +260,140 @@ def merge_cross_pipeline(
 # 3. Generic pairwise Diebold-Mariano test
 # ---------------------------------------------------------------------------
 
+def cumulative_var_level_interval(
+    var_fit,
+    target_idx: int,
+    max_h: int,
+    alphas: tuple[float, ...] = (0.10, 0.05),
+) -> dict[float, np.ndarray]:
+    """
+    Analytical (1 - alpha) prediction-interval half-widths for the *level*
+    series reconstructed from a VAR(X) fitted on first differences (issue #103).
+
+    `EDA_VAR_AIC _lag _order.py` and `johansen_vecm.py`'s VAR-AIC baseline both
+    fit a VAR on differences and reconstruct the h-day-ahead level forecast as
+    last_level + cumsum(d_hat_1, ..., d_hat_h). The reconstructed level's
+    forecast-error variance is therefore the variance of that CUMULATIVE SUM of
+    per-step differenced forecast errors, not the per-step differenced forecast
+    variance the textbook VAR interval formula and statsmodels'
+    `VARResults.forecast_interval()` / `.mse()` give you -- those answer "how
+    uncertain is d_hat_h alone", not "how uncertain is the sum d_hat_1 + ... +
+    d_hat_h". Naively summing per-step MSEs (or intervals) across h would also
+    be wrong, since the per-step forecast errors are serially correlated (they
+    share the same underlying shocks) -- the two errors are not proportional to
+    each other for h > 1.
+
+    Derivation (Lutkepohl 2005, ch. 2-3 Wold/MA representation): write the VAR's
+    d-step-ahead forecast error as e_d = sum_{j=0}^{d-1} Phi_j u_{t+d-j}, where
+    Phi_0 = I and Phi_1, Phi_2, ... are the Wold MA coefficient matrices and u
+    is the (co)variance-Sigma_u innovation. Summing e_1..e_h and collecting
+    terms by shock time t+k (k = 1..h) gives:
+
+        sum_{d=1}^{h} e_d = sum_{k=1}^{h} Psi_{h-k} u_{t+k},   Psi_m := sum_{j=0}^{m} Phi_j
+
+    so, since the u_{t+k} are uncorrelated across k:
+
+        Sigma_level_h = Var(sum_{d=1}^h e_d) = sum_{m=0}^{h-1} Psi_m @ Sigma_u @ Psi_m.T
+
+    Sigma_level_h is a running (cumulative) sum over m, computed once for
+    m = 0..max_h-1 and sliced per horizon -- O(max_h) matrix products, no
+    refitting. For a model with exogenous regressors (e.g. `d_cpi_yoy` in
+    EDA_VAR_AIC's VARX, forecast at its own expanding-window mean since a real
+    CPI release isn't known ahead of time), `Sigma_u` and `Phi_j` come from the
+    fitted endogenous system conditional on the supplied exog path -- this
+    formula treats that path as given, so the resulting band does not include
+    uncertainty in the exog forecast itself and is, to that extent, a lower
+    bound on total uncertainty for VARX models.
+
+    Parameters
+    ----------
+    var_fit : statsmodels VARResultsWrapper
+        A fitted `VAR(...).fit(lag)` result (differenced series).
+    target_idx : int
+        Column position of the target series in `var_fit`'s endogenous system.
+    max_h : int
+        Largest horizon needed; half-widths for every h in 1..max_h are
+        returned at once.
+    alphas : tuple[float, ...]
+        Two-sided significance levels, e.g. (0.10, 0.05) for 90%/95% bands.
+
+    Returns
+    -------
+    dict[float, np.ndarray]
+        alpha -> array of shape (max_h,), the half-width at each horizon
+        1..max_h (index h-1), i.e. the level forecast at horizon h has
+        interval [level_hat_h - half_width[h-1], level_hat_h + half_width[h-1]].
+    """
+    phi = var_fit.ma_rep(max_h - 1)  # (max_h, k, k): Phi_0 (=I), Phi_1, ..., Phi_{max_h-1}
+    psi_cum = np.cumsum(phi, axis=0)  # Psi_m = sum_{j=0}^{m} Phi_j, shape (max_h, k, k)
+    sigma_u = np.asarray(var_fit.sigma_u)
+
+    k = sigma_u.shape[0]
+    sigma_level_h = np.zeros((max_h, k, k))
+    running = np.zeros((k, k))
+    for m in range(max_h):
+        running = running + psi_cum[m] @ sigma_u @ psi_cum[m].T
+        sigma_level_h[m] = running
+
+    # Numerical floor: guards against a tiny negative diagonal from
+    # floating-point cancellation in the matrix accumulation above.
+    target_var = np.maximum(sigma_level_h[:, target_idx, target_idx], 0.0)
+    se = np.sqrt(target_var)
+
+    return {alpha: float(stats.norm.ppf(1.0 - alpha / 2.0)) * se for alpha in alphas}
+
+
+def interval_coverage_summary(
+    df: pd.DataFrame,
+    actual_col: str,
+    lower_cols: dict[float, str],
+    upper_cols: dict[float, str],
+    horizon_col: str = "horizon",
+) -> pd.DataFrame:
+    """
+    Empirical coverage rate and mean interval width (MIW) per horizon, for one
+    or more nominal levels (issue #103's calibration/coverage requirement).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Per-origin forecasts, one row per (origin, horizon), with an actual
+        column and a lower/upper bound column pair per nominal level.
+    actual_col : str
+        Column holding the realized value.
+    lower_cols, upper_cols : dict[float, str]
+        nominal_level (e.g. 90.0, 95.0) -> column name, one entry per band.
+        Both dicts must share the same keys.
+    horizon_col : str
+        Column to group by.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per horizon, with `target_nominal_{lvl}`,
+        `empirical_coverage_{lvl}`, and `mean_interval_width_{lvl}` columns for
+        every nominal level in `lower_cols`.
+    """
+    if set(lower_cols) != set(upper_cols):
+        raise ValueError("lower_cols and upper_cols must share the same nominal-level keys")
+
+    rows = []
+    for h, sub in df.groupby(horizon_col):
+        row: dict = {"horizon": h}
+        actual = sub[actual_col].to_numpy()
+        for level in sorted(lower_cols):
+            lo = sub[lower_cols[level]].to_numpy()
+            hi = sub[upper_cols[level]].to_numpy()
+            covered = (actual >= lo) & (actual <= hi)
+            tag = str(int(level)) if float(level).is_integer() else str(level)
+            row[f"target_nominal_{tag}"] = float(level)
+            row[f"empirical_coverage_{tag}"] = round(float(np.mean(covered) * 100.0), 2)
+            row[f"mean_interval_width_{tag}"] = round(float(np.mean(hi - lo)), 4)
+        rows.append(row)
+
+    return pd.DataFrame(rows).sort_values(horizon_col).reset_index(drop=True)
+
+
 def pairwise_dm(actual: np.ndarray, pred_a: np.ndarray, pred_b: np.ndarray, h: int) -> dict:
     """
     Runs the DM test for both squared-error and absolute-error loss, per the
