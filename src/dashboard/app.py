@@ -11,6 +11,7 @@ from data_loader import (
     get_eda_findings,
     get_pipeline_metadata,
     get_round3_features,
+    load_clark_west_sensitivity_results,
     load_fevd_results,
     load_gold_features,
     load_irf_results,
@@ -638,12 +639,9 @@ with tab_statistics:
         )
 
     if "r2_oos" in cw_horizon.columns:
-        s = cw_horizon["r2_oos"]
         cw_table = cw_horizon.assign(
-            r2_oos_fmt=np.where(
-                s.notna(),
-                (s * 100.0).map("{:+.2f}%".format),
-                "—",
+            r2_oos_fmt=cw_horizon["r2_oos"].apply(
+                lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
             )
         )
     else:
@@ -651,6 +649,7 @@ with tab_statistics:
 
     COLUMN_MAPPING = {
         "model": "Model",
+        "n_forecasts": "N",
         "r2_oos_fmt": "OOS R² (vs RW)",
         "cw_stat": "CW Statistic",
         "cw_p_value": "Raw p-value",
@@ -675,6 +674,25 @@ with tab_statistics:
         hide_index=True,
         use_container_width=True,
     )
+
+    with st.expander("Sensitivity Battery: BIC Model Specifications (m=6)"):
+        sens_df = load_clark_west_sensitivity_results()
+        if sens_df is not None and not sens_df.empty:
+            sens_h = sens_df[sens_df["horizon"] == horizon].copy()
+            if not sens_h.empty:
+                sens_h["r2_oos_fmt"] = sens_h["r2_oos"].apply(
+                    lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
+                )
+                sens_table = (
+                    sens_h[list(COLUMN_MAPPING.keys())]
+                    .rename(columns=COLUMN_MAPPING)
+                    .copy()
+                )
+                st.dataframe(sens_table, hide_index=True, use_container_width=True)
+                st.caption(
+                    "Sensitivity battery evaluates 2 BIC specifications (ARIMA-BIC, VAR-BIC) "
+                    "across 3 horizons under separate m=6 FDR family control."
+                )
 
     st.caption(
         "Out-of-Sample R² (R²_OOS = 1 − MSPE_model / MSPE_naive) measures realized "
@@ -952,20 +970,18 @@ with tab_decision:
     )
 
     if horizon == 1:
-        fdr_outcome_1 = (
-            f"candidate models demonstrate statistically reliable improvement after FDR correction (q = {strongest_q_val} <= {ALPHA})."
-            if fdr_significant
-            else "none demonstrates statistically reliable improvement after FDR correction."
-        )
+        r2_polarity = "negative" if (not r2_vals.empty and r2_vals.max() <= 0) else "predominantly negative"
+        if fdr_significant:
+            fdr_verdict_1 = f"Although select candidates show nominal gains, multiplicity correction confirms these are not statistically distinguishable from noise (q = {strongest_q_val} <= {ALPHA})."
+        else:
+            fdr_verdict_1 = "No candidate model demonstrates statistically reliable improvement after FDR multiplicity control."
 
         st.info(
             f"""
-            The Naïve Random Walk provides the lowest common-sample
-            forecast error at the 1-day horizon. All candidate models yield
-            negative raw OOS R² ({r2_min_str} to {r2_max_str}), and {fdr_outcome_1}
+            The Naïve Random Walk provides the lowest point forecast error at the 1-day horizon.
+            All candidate models yield {r2_polarity} raw OOS R² ({r2_min_str} to {r2_max_str}), and {fdr_verdict_1}
 
-            **Operational conclusion:** retain the Naïve benchmark
-            for very short-term forecasting.
+            **Operational conclusion:** Retain the Naïve Random Walk benchmark for short-term daily forecasting.
             """
         )
 

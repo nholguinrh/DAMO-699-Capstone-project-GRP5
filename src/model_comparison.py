@@ -555,21 +555,25 @@ def plain_language_verdict_cw(row: dict | pd.Series, model_name: str) -> str:
     if cw_stat is None or p_val is None:
         return "insufficient data to compute verdict"
 
+    mspe_n_str = f"{mspe_n:.5f}" if mspe_n is not None else "N/A"
+    mspe_m_str = f"{mspe_m:.5f}" if mspe_m is not None else "N/A"
+    mspe_adj_str = f"{mspe_adj:.5f}" if mspe_adj is not None else "N/A"
+
     if sig:
         return (
             f"{model_name} significantly outperforms Naïve benchmark after Clark-West MSPE adjustment "
-            f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_adj={mspe_adj:.5f})"
+            f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n_str}, MSPE_adj={mspe_adj_str})"
         )
     else:
         if cw_stat <= 0:
             return (
                 f"No significant improvement: {model_name} does not beat Naïve under Clark-West "
-                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_model={mspe_m:.5f})"
+                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n_str}, MSPE_model={mspe_m_str})"
             )
         else:
             return (
                 f"Positive point gain not statistically significant: {model_name} fails to reject equal accuracy "
-                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n:.5f}, MSPE_adj={mspe_adj:.5f})"
+                f"(CW={cw_stat:.3f}, p={p_val:.4f}; MSPE_naive={mspe_n_str}, MSPE_adj={mspe_adj_str})"
             )
 
 
@@ -607,18 +611,6 @@ def run_clark_west_battery(
         lstm, "lstm", lstm_calendar(),
     )
 
-    primary_models = [
-        ("arima_aic", "ARIMA-AIC", "core"),
-        ("var_aic", "VAR-AIC", "core"),
-        ("vecm", "VECM (6-var)", "vecm"),
-        ("lstm", "LSTM (Tuned)", "lstm"),
-    ]
-
-    sensitivity_models = [
-        ("arima_bic", "ARIMA-BIC", "core"),
-        ("var_bic", "VAR-BIC", "core"),
-    ]
-
     # Incorporate XGBoost into the primary research scope
     xgb_raw = load_xgboost(d_min, d_max)
     m_xgb = None
@@ -627,7 +619,32 @@ def run_clark_west_battery(
             core, "arima_aic", core_calendar(),
             xgb_raw, "xgboost", xgboost_calendar(),
         )
+
+    # Align all candidate models to the strict common sample intersection
+    # to guarantee an identical Naïve benchmark baseline across all arms (Review finding 4.3).
+    common_origins = set(core["origin_date"]).intersection(vecm["origin_date"]).intersection(m_lstm["origin_date"])
+    if m_xgb is not None:
+        common_origins = common_origins.intersection(m_xgb["origin_date"])
+
+    core = core[core["origin_date"].isin(common_origins)]
+    vecm = vecm[vecm["origin_date"].isin(common_origins)]
+    m_lstm = m_lstm[m_lstm["origin_date"].isin(common_origins)]
+    if m_xgb is not None:
+        m_xgb = m_xgb[m_xgb["origin_date"].isin(common_origins)]
+
+    primary_models = [
+        ("arima_aic", "ARIMA-AIC", "core"),
+        ("var_aic", "VAR-AIC", "core"),
+        ("vecm", "VECM (6-var)", "vecm"),
+        ("lstm", "LSTM (Tuned)", "lstm"),
+    ]
+    if m_xgb is not None:
         primary_models.append(("xgboost", "XGBoost", "xgboost"))
+
+    sensitivity_models = [
+        ("arima_bic", "ARIMA-BIC", "core"),
+        ("var_bic", "VAR-BIC", "core"),
+    ]
 
 
     def _evaluate_models(model_list: list[tuple[str, str, str]]) -> pd.DataFrame:
@@ -691,52 +708,47 @@ def apply_clark_west_fdr(cw_df: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
     out["cw_p_adj_global"] = np.nan
     out["cw_p_adj_horizon"] = np.nan
 
+    sign_col = "cw_stat_raw" if "cw_stat_raw" in out.columns else "cw_stat"
+    out["model_significantly_better_fdr_global"] = False
+    out["model_significantly_better_fdr_horizon"] = False
+
     # 1. Global FDR
     testable = out[p_col].notna() & (~out["insufficient_sample"])
     if testable.any():
-        _, p_adj_glob, _, _ = multipletests(
+        rej_glob, p_adj_glob, _, _ = multipletests(
             out.loc[testable, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
         )
         out.loc[testable, "cw_p_adj_global"] = np.round(p_adj_glob, 4)
+        out.loc[testable, "model_significantly_better_fdr_global"] = (
+            rej_glob & (out.loc[testable, sign_col] > 0)
+        )
 
     # 2. Horizon-Stratified FDR
     for h in out["horizon"].unique():
         h_mask = testable & (out["horizon"] == h)
         if h_mask.any():
-            _, p_adj_h, _, _ = multipletests(
+            rej_h, p_adj_h, _, _ = multipletests(
                 out.loc[h_mask, p_col].to_numpy(), alpha=alpha, method="fdr_bh",
             )
             out.loc[h_mask, "cw_p_adj_horizon"] = np.round(p_adj_h, 4)
-
-    # Significance flags (requires p_adj < alpha AND cw_stat > 0).
-    # Use the unrounded cw_stat_raw for the sign check to avoid rounding
-    # artifacts near zero (Nelson review point 4).
-    sign_col = "cw_stat_raw" if "cw_stat_raw" in out.columns else "cw_stat"
-    out["model_significantly_better_fdr_global"] = (
-        out["cw_p_adj_global"].notna()
-        & (out["cw_p_adj_global"] < alpha)
-        & (out[sign_col] > 0)
-    )
-    out["model_significantly_better_fdr_horizon"] = (
-        out["cw_p_adj_horizon"].notna()
-        & (out["cw_p_adj_horizon"] < alpha)
-        & (out[sign_col] > 0)
-    )
+            out.loc[h_mask, "model_significantly_better_fdr_horizon"] = (
+                rej_h & (out.loc[h_mask, sign_col] > 0)
+            )
 
     # Verdicts under FDR — single parameterized helper to avoid drift
     # between global and horizon tiers (Nelson review point 5).
     def _fdr_verdict(row: pd.Series, sig_col: str, p_adj_col: str) -> str:
         r_dict = {
-            "insufficient_sample": row["insufficient_sample"],
-            "n_forecasts": row["n_forecasts"],
-            "model_significantly_better": row[sig_col],
-            "cw_stat": row["cw_stat"],
-            "cw_p_value": row[p_adj_col],
-            "mspe_naive": row["mspe_naive"],
-            "mspe_model": row["mspe_model"],
-            "mspe_model_adj": row["mspe_model_adj"],
+            "insufficient_sample": row.get("insufficient_sample", False),
+            "n_forecasts": row.get("n_forecasts", 0),
+            "model_significantly_better": row.get(sig_col, False),
+            "cw_stat": row.get("cw_stat"),
+            "cw_p_value": row.get(p_adj_col),
+            "mspe_naive": row.get("mspe_naive"),
+            "mspe_model": row.get("mspe_model"),
+            "mspe_model_adj": row.get("mspe_model_adj"),
         }
-        return plain_language_verdict_cw(r_dict, row["model"])
+        return plain_language_verdict_cw(r_dict, row.get("model", "Model"))
 
     out["verdict_fdr_global"] = out.apply(
         lambda r: _fdr_verdict(r, "model_significantly_better_fdr_global", "cw_p_adj_global"), axis=1
@@ -845,9 +857,14 @@ def evaluate_regime_segmentation(
                 else:
                     cw_res = {}
                     # Calculate descriptive raw R2_OOS without asymptotic significance claim
-                    mspe_n = np.mean((act - naive) ** 2)
-                    mspe_m = np.mean((act - pred) ** 2)
-                    r2_oos = round(float(1.0 - mspe_m / mspe_n), 6) if mspe_n > 0 else 0.0
+                    mask = np.isfinite(act) & np.isfinite(naive) & np.isfinite(pred)
+                    if np.any(mask):
+                        mspe_n = float(np.mean((act[mask] - naive[mask]) ** 2))
+                        mspe_m = float(np.mean((act[mask] - pred[mask]) ** 2))
+                        EPS = 1e-12
+                        r2_oos = round(1.0 - (mspe_m / mspe_n), 6) if mspe_n > EPS else None
+                    else:
+                        r2_oos = None
                     r2_oos_adj = None
                     cw_stat = None
                     cw_p_value = None
@@ -891,8 +908,10 @@ def export_all_model_comparisons(output_dir: Path | None = None) -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     primary_df, sensitivity_df = run_clark_west_battery()
-    primary_df.to_csv(out / "clark_west_test_results.csv", index=False)
-    sensitivity_df.to_csv(out / "clark_west_sensitivity_results.csv", index=False)
+    csv_cols_p = [c for c in primary_df.columns if not c.endswith("_raw")]
+    csv_cols_s = [c for c in sensitivity_df.columns if not c.endswith("_raw")]
+    primary_df[csv_cols_p].to_csv(out / "clark_west_test_results.csv", index=False)
+    sensitivity_df[csv_cols_s].to_csv(out / "clark_west_sensitivity_results.csv", index=False)
     logger.info("Saved Clark-West battery results to %s", out)
 
     regime_df = evaluate_regime_segmentation(output_path=out / "r3_regime_segmented_metrics.csv")
