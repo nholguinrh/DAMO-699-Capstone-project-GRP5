@@ -89,6 +89,31 @@ This is how we work — read this before contributing.
 └── TIMELINE.md         # Schedule and milestones
 ```
 
+## Running the dashboard
+
+The executive Streamlit dashboard is launched **from the project root**:
+
+```bash
+streamlit run streamlit_app.py          # preferred
+# or, equivalently:
+streamlit run src/dashboard/app.py
+```
+
+Both forms put the repo root on `sys.path`, so the dashboard can import the
+shared pipeline code. It renders against the committed files in `outputs/`; the
+sidebar **Data Pipeline** control re-runs the Path A pipeline
+(bronze → silver → gold: `data/processed/*.csv` + `data/processed/gold_features.csv`)
+on demand. It does **not** re-run the forecasting models or the
+Clark-West / SHAP / IRF / FEVD outputs.
+
+The same pipeline is available on the command line:
+
+```bash
+python src/run_data_collection.py --from-cache          # rebuild processed CSVs from the raw cache
+python src/run_data_collection.py --end-date 2026-08-31 # pull a later window (live APIs; needs FRED key)
+python src/pipeline_runner.py --mode cache              # processed CSVs + Gold in one step
+```
+
 ## Key documents
 
 - **Team Charter (Social Contract):** [./TEAM_CHARTER.md](./TEAM_CHARTER.md) — 🚧 in progress

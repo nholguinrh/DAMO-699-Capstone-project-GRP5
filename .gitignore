@@ -19,3 +19,6 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+
+# Dashboard pipeline-trigger run summary (per-run, machine-local)
+outputs/pipeline_run_status.json

@@ -1,5 +1,24 @@
+import sys
+from datetime import date
+from pathlib import Path
+
+# Run from the project root: put both the repo root (for ``src.*`` imports, e.g.
+# the pipeline runner) and this directory (for ``data_loader`` / ``charts``) on
+# sys.path regardless of how Streamlit was launched.
+_APP_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _APP_DIR.parents[1]
+for _p in (str(_PROJECT_ROOT), str(_APP_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import numpy as np
 import pandas as pd
 import streamlit as st
+
+from src.pipeline_runner import DATE_END as PIPELINE_END_DEFAULT
+from src.pipeline_runner import read_run_status, run_pipeline
+
+ALPHA = 0.05
 
 from data_loader import (
     build_common_forecast_dataset,
@@ -8,6 +27,7 @@ from data_loader import (
     get_eda_findings,
     get_pipeline_metadata,
     get_round3_features,
+    load_clark_west_sensitivity_results,
     load_fevd_results,
     load_gold_features,
     load_irf_results,
@@ -109,6 +129,140 @@ uncertainty_interval = st.sidebar.radio(
     help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
 )
 
+
+
+# =========================================================
+# SIDEBAR — DATA PIPELINE TRIGGER (Path A: bronze → silver → gold)
+# =========================================================
+
+st.sidebar.divider()
+st.sidebar.subheader("Data Pipeline")
+
+_status = read_run_status()
+
+if _status is None:
+    st.sidebar.caption("No pipeline run recorded yet.")
+else:
+    _badge = {
+        "success": "🟢",
+        "warning": "🟡",
+        "error": "🔴",
+    }.get(_status.get("status"), "⚪")
+
+    st.sidebar.caption(
+        f"{_badge} Last run {_status.get('end_time', '?')} "
+        f"· mode: {_status.get('mode', '?')}"
+    )
+
+    if any(
+        source.get("mode") == "cached_fallback"
+        for source in _status.get("sources", {}).values()
+    ):
+        st.sidebar.caption(
+            "⚠️ a source used cached fallback on the last run"
+        )
+
+_pipeline_mode = st.sidebar.radio(
+    "Run mode",
+    options=["cache", "live"],
+    format_func=lambda m: (
+        "Cached rebuild (offline)"
+        if m == "cache"
+        else "Live API refresh (needs FRED key)"
+    ),
+    key="pipeline_mode",
+)
+
+_pipeline_end = st.sidebar.date_input(
+    "Ingestion end date",
+    value=date.fromisoformat(PIPELINE_END_DEFAULT),
+    # The Gold frame needs 12 months of CPI before the first YoY row
+    # (canonical start 2010-02-19); an earlier end date yields an empty frame.
+    min_value=date(2010, 3, 1),
+    max_value=date.today(),
+    key="pipeline_end_date",
+)
+
+_pipeline_running = st.session_state.get("pipeline_running", False)
+
+if st.sidebar.button(
+    "Rebuild data & features",
+    disabled=_pipeline_running,
+    use_container_width=True,
+):
+    st.session_state["pipeline_running"] = True
+    _report = None
+    try:
+        with st.status(
+            "Running Path A pipeline…",
+            expanded=True,
+        ) as _status_box:
+            st.write(
+                f"Mode: **{_pipeline_mode}** · "
+                f"window ends {_pipeline_end.isoformat()}"
+            )
+
+            _report = run_pipeline(
+                mode=_pipeline_mode,
+                end_date=_pipeline_end.isoformat(),
+            )
+
+            for _src in _report["sources"].values():
+                _icon = {
+                    "success": "✅",
+                    "warning": "⚠️",
+                    "failed": "❌",
+                }.get(_src["status"], "•")
+                st.write(
+                    f"{_icon} {_src['name']}: "
+                    f"{_src['status']} ({_src['mode']})"
+                )
+
+            _gold = _report["gold"]
+            if _gold["status"] == "success":
+                st.write(
+                    f"✅ Gold: {_gold['rows']} rows "
+                    f"through {_gold['date_range'][1]}"
+                )
+            else:
+                st.write(
+                    f"❌ Gold: {_gold['status']} — "
+                    f"{_gold.get('error', _gold.get('reason', ''))}"
+                )
+
+            for _warning in _report["warnings"]:
+                st.warning(_warning)
+
+            _status_box.update(
+                label=f"Pipeline finished: {_report['status']}",
+                state=(
+                    "error"
+                    if _report["status"] == "error"
+                    else "complete"
+                ),
+                expanded=_report["status"] == "error",
+            )
+    finally:
+        st.session_state["pipeline_running"] = False
+
+    # No @st.cache_data is used in this app, so the next rerun re-reads every
+    # CSV. clear() is a harmless no-op today and stays correct if caching is
+    # added later.
+    st.cache_data.clear()
+
+    # On error, keep the expanded st.status box (with the per-source failure
+    # detail) on screen -- an st.rerun() here would wipe it and leave only the
+    # 🔴 sidebar badge. On success / warning the rerun refreshes the dashboard
+    # against the freshly rebuilt data. _report stays None if run_pipeline()
+    # raised before returning, so guard against that too.
+    if _report is not None and _report["status"] != "error":
+        st.rerun()
+
+st.sidebar.caption(
+    "Runs the Path A pipeline: rebuilds data/processed/*.csv and the Gold "
+    "feature store. Forecast, Clark-West and SHAP/IRF/FEVD outputs are **not** "
+    "re-run and may lag a fresh rebuild."
+)
 
 
 # =========================================================
@@ -316,6 +470,12 @@ Statistics Canada API ──┘           ↓
         "and momentum indicators are strictly backward-looking. For multi-step forecasting ($h > 1$), models "
         "predict cumulative change $\\Delta_h y_t = \\sum_{k=1}^h \\Delta y_{t+k}$ without access to contemporaneous "
         "macroeconomic shocks."
+    )
+
+    st.caption(
+        "The sidebar **Data Pipeline** control re-runs this bronze → silver → "
+        "gold sequence (Path A) on demand. It does not re-run the forecasting "
+        "models or the Clark-West / SHAP / IRF / FEVD outputs."
     )
 
     st.markdown("---")
@@ -621,7 +781,7 @@ with tab_statistics:
         ].tolist()
 
         st.success(
-            "Models significant after horizon-level FDR: "
+            f"Models significant after horizon-level FDR (m=5, α={ALPHA}): "
             + ", ".join(significant_models)
         )
 
@@ -634,27 +794,36 @@ with tab_statistics:
             "after horizon-level FDR correction."
         )
 
-    display_cols = [
-        "model",
-        "cw_stat",
-        "cw_p_value",
-        "cw_p_adj_horizon",
-        "model_significantly_better",
-        "model_significantly_better_fdr_horizon",
-    ]
+    if "r2_oos" in cw_horizon.columns:
+        cw_table = cw_horizon.assign(
+            r2_oos_fmt=cw_horizon["r2_oos"].apply(
+                lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
+            )
+        )
+    else:
+        cw_table = cw_horizon.assign(r2_oos_fmt="—")
 
-    cw_table = cw_horizon[
-        display_cols
-    ].copy()
+    COLUMN_MAPPING = {
+        "model": "Model",
+        "n_forecasts": "N",
+        "r2_oos_fmt": "OOS R² (vs RW)",
+        "cw_stat": "CW Statistic",
+        "cw_p_value": "Raw p-value",
+        "cw_p_adj_horizon": "FDR q-value",
+        "model_significantly_better": "Raw Significant",
+        "model_significantly_better_fdr_horizon": "FDR Significant",
+    }
 
-    cw_table.columns = [
-        "Model",
-        "CW Statistic",
-        "Raw p-value",
-        "FDR q-value",
-        "Raw Significant",
-        "FDR Significant",
-    ]
+    missing_cols = set(COLUMN_MAPPING.keys()) - set(cw_table.columns)
+    if missing_cols:
+        st.error(f"Schema contract violation: missing columns {missing_cols}")
+        st.stop()
+
+    cw_table = (
+        cw_table[list(COLUMN_MAPPING.keys())]
+        .rename(columns=COLUMN_MAPPING)
+        .copy()
+    )
 
     st.dataframe(
         cw_table,
@@ -662,10 +831,37 @@ with tab_statistics:
         use_container_width=True,
     )
 
+    with st.expander("Sensitivity Battery: BIC Model Specifications (m=6)"):
+        sens_df = load_clark_west_sensitivity_results()
+        if sens_df is not None and not sens_df.empty:
+            sens_h = sens_df[sens_df["horizon"] == horizon].copy()
+            if not sens_h.empty:
+                sens_h["r2_oos_fmt"] = sens_h["r2_oos"].apply(
+                    lambda x: f"{x * 100.0:+.2f}%" if pd.notna(x) else "—"
+                )
+                sens_table = (
+                    sens_h[list(COLUMN_MAPPING.keys())]
+                    .rename(columns=COLUMN_MAPPING)
+                    .copy()
+                )
+                st.dataframe(sens_table, hide_index=True, use_container_width=True)
+                st.caption(
+                    "Sensitivity battery evaluates 2 BIC specifications (ARIMA-BIC, VAR-BIC) "
+                    "across 3 horizons under separate m=6 FDR family control."
+                )
+
     st.caption(
-        "Clark-West statistics are loaded directly from the "
-        "canonical project evaluation output and are not "
-        "recalculated in Streamlit."
+        "Out-of-Sample R² (R²_OOS = 1 − MSPE_model / MSPE_naive) measures realized "
+        "proportional MSPE reduction relative to the Naïve Random Walk benchmark "
+        "(Campbell & Thompson 2008; Welch & Goyal 2008). The Clark-West (2007) test accounts "
+        "for finite-sample parameter estimation noise under the null to determine whether "
+        "positive OOS R² reflects genuine predictive ability. All statistics are loaded "
+        "directly from canonical project evaluation outputs and are not recalculated in Streamlit.\n\n"
+        "**Multiple Testing Multiplicity Control:** All five candidate models (ARIMA-AIC, VAR-AIC, "
+        "VECM (6-var), LSTM, and XGBoost) are jointly evaluated under a unified primary hypothesis testing "
+        "battery (m = 15 total hypotheses across 3 horizons, m = 5 tests per horizon) using Benjamini-Hochberg (1995) "
+        "False Discovery Rate control. XGBoost is incorporated into the primary research scope to provide a balanced "
+        "comparison between classical econometric specifications, tabular machine learning, and deep learning (LSTM)."
     )
 
 
@@ -898,8 +1094,11 @@ with tab_decision:
             "Strongest Clark-West",
             f"p = {strongest_cw['cw_p_value']:.4f}",
         )
+        r2_info = ""
+        if "r2_oos" in strongest_cw and pd.notna(strongest_cw["r2_oos"]):
+            r2_info = f" | OOS R²: {strongest_cw['r2_oos'] * 100:+.2f}%"
         st.caption(
-            f"Model: {strongest_cw['model']}"
+            f"Model: {strongest_cw['model']}{r2_info}"
         )
 
     with col4:
@@ -912,28 +1111,48 @@ with tab_decision:
         f"Decision at the {horizon}-Day Horizon"
     )
 
+    r2_vals = cw_horizon["r2_oos"].dropna()
+    r2_min_str = f"{r2_vals.min() * 100:+.2f}%" if not r2_vals.empty else "N/A"
+    r2_max_str = f"{r2_vals.max() * 100:+.2f}%" if not r2_vals.empty else "N/A"
+
+    strongest_model = strongest_cw["model"]
+    strongest_cw_val = f"{strongest_cw['cw_stat']:.3f}"
+    strongest_p_val = f"{strongest_cw['cw_p_value']:.4f}"
+    strongest_q_val = f"{strongest_cw['cw_p_adj_horizon']:.4f}"
+    strongest_r2_val = (
+        f"{strongest_cw['r2_oos'] * 100:+.2f}%"
+        if "r2_oos" in strongest_cw and pd.notna(strongest_cw["r2_oos"])
+        else "N/A"
+    )
+
     if horizon == 1:
+        r2_polarity = "negative" if (not r2_vals.empty and r2_vals.max() <= 0) else "predominantly negative"
+        if fdr_significant:
+            fdr_verdict_1 = f"Although select candidates show nominal gains, multiplicity correction confirms these are not statistically distinguishable from noise (q = {strongest_q_val} <= {ALPHA})."
+        else:
+            fdr_verdict_1 = "No candidate model demonstrates statistically reliable improvement after FDR multiplicity control."
 
         st.info(
-            """
-            The Naïve Random Walk provides the lowest common-sample
-            forecast error at the 1-day horizon. None of the more
-            complex models demonstrates statistically reliable
-            improvement after FDR correction.
+            f"""
+            The Naïve Random Walk provides the lowest point forecast error at the 1-day horizon.
+            All candidate models yield {r2_polarity} raw OOS R² ({r2_min_str} to {r2_max_str}), and {fdr_verdict_1}
 
-            **Operational conclusion:** retain the Naïve benchmark
-            for very short-term forecasting.
+            **Operational conclusion:** Retain the Naïve Random Walk benchmark for short-term daily forecasting.
             """
         )
 
     elif horizon == 5:
+        fdr_outcome_5 = (
+            f"candidate models demonstrate statistically reliable improvement after FDR correction (q = {strongest_q_val} <= {ALPHA})."
+            if fdr_significant
+            else "no candidate model demonstrates statistically reliable improvement after FDR correction."
+        )
 
         st.info(
-            """
+            f"""
             The Naïve Random Walk remains the strongest common-sample
-            benchmark at the 5-day horizon. LSTM is comparatively close,
-            but no candidate model demonstrates statistically reliable
-            improvement after FDR correction.
+            benchmark at the 5-day horizon. {strongest_model} is comparatively close
+            (raw OOS R² = {strongest_r2_val}), but {fdr_outcome_5}
 
             **Operational conclusion:** additional model complexity is
             not justified at this horizon based on the available evidence.
@@ -941,20 +1160,29 @@ with tab_decision:
         )
 
     else:
+        best_rmse_model = best_rmse_row["model"]
+        r2_direction = "a positive" if (pd.notna(strongest_cw.get("r2_oos")) and strongest_cw["r2_oos"] > 0) else "a"
+        fdr_verdict_text = (
+            "The Clark-West result remains significant"
+            if fdr_significant
+            else "However, the Clark-West result does not remain significant"
+        )
+        fdr_cmp = "<=" if fdr_significant else ">"
 
         st.info(
-            """
-            VECM provides the lowest RMSE and MAE on the common 20-day
-            evaluation sample and produces the strongest raw Clark-West
-            evidence against the Naïve benchmark.
+            f"""
+            {best_rmse_model} provides the lowest point-forecast error (RMSE) on the common 20-day
+            evaluation sample. Across the candidate battery, {strongest_model} produces the strongest
+            raw Clark-West evidence against the Naïve benchmark (CW = {strongest_cw_val}, raw p = {strongest_p_val}),
+            generating {r2_direction} raw OOS R² of {strongest_r2_val}.
 
-            However, the Clark-West result does not remain significant
-            after horizon-level FDR correction.
+            {fdr_verdict_text}
+            after horizon-level FDR correction (q = {strongest_q_val} {fdr_cmp} {ALPHA}).
 
-            **Operational conclusion:** VECM is the most promising
+            **Operational conclusion:** {strongest_model} is the most promising
             longer-horizon candidate, but the Naïve Random Walk remains
-            the more defensible operational benchmark until the VECM
-            improvement is validated more robustly.
+            the more defensible operational benchmark until the improvement
+            is validated more robustly.
             """
         )
 
