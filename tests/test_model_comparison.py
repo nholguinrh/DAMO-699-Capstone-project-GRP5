@@ -529,7 +529,7 @@ def test_forecast_error_distribution_missing_column_resilience():
 
 
 def test_dashboard_clark_west_summary_includes_xgboost():
-    """Assert dashboard get_clark_west_summary directly includes XGBoost under canonical name."""
+    """Assert dashboard get_clark_west_summary directly includes XGBoost with sensitivity family q-values."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
@@ -540,6 +540,11 @@ def test_dashboard_clark_west_summary_includes_xgboost():
         models = set(cw["model"])
         assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
         assert "XGBoost (Experimental)" not in models, "Model name should be strictly 'XGBoost'"
+
+        # Verify that XGBoost's displayed q-value originates from the sensitivity family contract
+        xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
+        expected_q = 0.8860 if h == 1 else (0.2580 if h == 5 else 0.2733)
+        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-4)
 
 
 def test_clark_west_r2_oos_mathematical_consistency():

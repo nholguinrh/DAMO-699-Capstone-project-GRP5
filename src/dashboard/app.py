@@ -14,17 +14,10 @@ from data_loader import (
     load_fevd_results,
     load_gold_features,
     load_irf_results,
+    load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
 )
-
-try:
-    from data_loader import load_regime_metrics
-except ImportError:
-    import importlib
-    import data_loader
-    importlib.reload(data_loader)
-    from data_loader import load_regime_metrics
 
 from charts import (
     MODEL_COLUMNS,
@@ -622,18 +615,19 @@ with tab_statistics:
         use_container_width=True,
     )
 
-    if fdr_significant:
-        significant_models = cw_horizon.loc[
-            cw_horizon[
-                "model_significantly_better_fdr_horizon"
-            ],
-            "model",
-        ].tolist()
+    core_cw = cw_horizon[cw_horizon["model_key"] != "xgboost"]
+    xgb_cw = cw_horizon[cw_horizon["model_key"] == "xgboost"]
 
-        st.success(
-            "Models significant after horizon-level FDR: "
-            + ", ".join(significant_models)
-        )
+    core_sig = core_cw[core_cw["model_significantly_better_fdr_horizon"]]["model"].tolist()
+    xgb_sig = xgb_cw[xgb_cw["model_significantly_better_fdr_horizon"]]["model"].tolist()
+
+    if core_sig or xgb_sig:
+        sig_msgs = []
+        if core_sig:
+            sig_msgs.append(f"Primary econometric models (m=12 family): {', '.join(core_sig)}")
+        if xgb_sig:
+            sig_msgs.append(f"Sensitivity battery (m=9 family): {', '.join(xgb_sig)}")
+        st.success("Models significant after horizon-level FDR:\n- " + "\n- ".join(sig_msgs))
 
     else:
         st.info(
@@ -661,7 +655,7 @@ with tab_statistics:
         "r2_oos_fmt": "OOS R² (vs RW)",
         "cw_stat": "CW Statistic",
         "cw_p_value": "Raw p-value",
-        "cw_p_adj_horizon": "FDR q-value",
+        "cw_p_adj_horizon": "FDR q-value*",
         "model_significantly_better": "Raw Significant",
         "model_significantly_better_fdr_horizon": "FDR Significant",
     }
@@ -689,7 +683,13 @@ with tab_statistics:
         "(Campbell & Thompson 2008; Welch & Goyal 2008). The Clark-West (2007) test accounts "
         "for finite-sample parameter estimation noise under the null to determine whether "
         "positive OOS R² reflects genuine predictive ability. All statistics are loaded "
-        "directly from canonical project evaluation outputs and are not recalculated in Streamlit."
+        "directly from canonical project evaluation outputs and are not recalculated in Streamlit.\n\n"
+        "**\\* Multiple Testing Family Disclosure:** FDR-adjusted q-values for the four core econometric "
+        "models (ARIMA-AIC, VAR-AIC, VECM (6-var), and LSTM) are controlled under the primary hypothesis family "
+        "(m = 12 total hypotheses across 3 horizons, 4 tests per horizon) to preserve statistical power. "
+        "To protect against artificial multiplicity inflation, XGBoost is evaluated under the sensitivity battery "
+        "family (m = 9 hypotheses, 3 per horizon alongside BIC specifications). Its displayed FDR q-value reflects "
+        "its sensitivity battery correction rather than a pooled 5-model joint family."
     )
 
 
