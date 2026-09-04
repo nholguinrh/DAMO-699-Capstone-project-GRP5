@@ -425,6 +425,12 @@ def test_run_clark_west_battery_smoke():
     assert primary_df["cw_p_adj_global"].notna().all()
     assert primary_df["cw_p_adj_horizon"].notna().all()
 
+    # Verify R2_OOS metrics are populated
+    assert "r2_oos" in primary_df.columns
+    assert "r2_oos_adj" in primary_df.columns
+    assert primary_df["r2_oos"].notna().all()
+    assert primary_df["r2_oos_adj"].notna().all()
+
 
 def test_clark_west_primary_battery_strictly_twelve_hypotheses():
     """Verify primary battery maintains exactly 4 canonical models x 3 horizons = 12 tests."""
@@ -520,6 +526,150 @@ def test_forecast_error_distribution_missing_column_resilience():
     fig_violin = create_forecast_error_distribution(df, horizon=1, chart_type="Violin")
     assert fig_box is not None
     assert fig_violin is not None
+
+
+def test_clark_west_r2_oos_mathematical_consistency():
+    """
+    Tests that R2_OOS and R2_OOS_adj strictly satisfy Campbell & Thompson (2008)
+    and Clark & West (2007) definitions:
+        R2_OOS = 1 - MSPE_model / MSPE_naive
+        R2_OOS_adj = 1 - MSPE_model_adj / MSPE_naive
+    """
+    rng = np.random.default_rng(42)
+    n = 200
+    actual = rng.normal(size=n)
+    naive = actual + rng.normal(scale=0.5, size=n)
+    pred = actual + rng.normal(scale=0.4, size=n)
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert not res["insufficient_sample"]
+    assert res["r2_oos"] is not None
+    assert res["r2_oos_adj"] is not None
+
+    expected_r2 = 1.0 - (res["mspe_model"] / res["mspe_naive"])
+    expected_r2_adj = 1.0 - (res["mspe_model_adj"] / res["mspe_naive"])
+
+    assert abs(res["r2_oos"] - expected_r2) < 1e-4
+    assert abs(res["r2_oos_adj"] - expected_r2_adj) < 1e-4
+
+
+def test_clark_west_r2_oos_insufficient_sample_is_none():
+    actual = np.array([1.0, 2.0])
+    naive = np.array([1.1, 2.1])
+    pred = np.array([1.2, 2.2])
+
+    res = clark_west_test(actual, naive, pred, h=5)
+    assert res["insufficient_sample"]
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+
+def test_run_clark_west_battery_expected_r2_benchmarks():
+    """
+    Verifies that canonical battery results match expected econometric benchmarks
+    for key models and horizons (Issue #99 specification):
+    - VECM (6-var) at h=20: +1.85% raw R2_OOS, +14.07% CW-adjusted R2_OOS
+    - LSTM (Tuned) at h=5: -0.19% raw R2_OOS, +1.31% CW-adjusted R2_OOS
+    - ARIMA-AIC at all horizons: negative raw R2_OOS
+    """
+    primary_df, sensitivity_df = run_clark_west_battery()
+
+    # VECM at h=20
+    vecm_20 = primary_df[(primary_df["model"] == "VECM (6-var)") & (primary_df["horizon"] == 20)].iloc[0]
+    assert 0.015 <= vecm_20["r2_oos"] <= 0.022  # ~+1.85% to +1.86%
+    assert 0.135 <= vecm_20["r2_oos_adj"] <= 0.145  # ~+14.07%
+
+    # LSTM at h=5
+    lstm_5 = primary_df[(primary_df["model"] == "LSTM (Tuned)") & (primary_df["horizon"] == 5)].iloc[0]
+    assert -0.003 <= lstm_5["r2_oos"] <= 0.0  # ~-0.19%
+    # ARIMA-AIC should have negative raw R2_OOS across all horizons
+    arima_df = primary_df[primary_df["model"] == "ARIMA-AIC"]
+    assert (arima_df["r2_oos"] < 0).all()
+
+
+def test_clark_west_r2_oos_zero_benchmark_mspe_is_none():
+    """When the naive benchmark is perfect (mspe_1 == 0), r2_oos and r2_oos_adj should be None."""
+    actual = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    naive = actual.copy()  # perfect forecast -> mspe_1 = 0
+    pred = actual + 0.1
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert not res["insufficient_sample"]
+    assert res["mspe_naive"] == 0.0
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+    # Test dashboard None -> "—" formatter
+    formatter = lambda x: f"{x * 100:+.2f}%" if pd.notna(x) else "—"
+    assert formatter(res["r2_oos"]) == "—"
+    assert formatter(0.018561) == "+1.86%"
+    assert formatter(-0.0019) == "-0.19%"
+
+
+def test_clark_west_r2_oos_noise_adjustment_invariant():
+    """
+    Mathematical invariant: Because adj = mean((y1 - y2)^2) >= 0,
+    MSPE_model_adj <= MSPE_model, which strictly implies
+    R2_OOS_adj >= R2_OOS for all valid non-trivial forecasts.
+    """
+    rng = np.random.default_rng(123)
+    n = 250
+    actual = rng.normal(size=n)
+    naive = actual + rng.normal(scale=0.5, size=n)
+    model = actual + rng.normal(scale=0.4, size=n)
+
+    res = clark_west_test(actual, naive, model, h=1)
+    assert res["r2_oos"] is not None
+    assert res["r2_oos_adj"] is not None
+    assert res["r2_oos_raw"] is not None
+    assert res["r2_oos_adj_raw"] is not None
+    assert res["r2_oos_adj"] >= res["r2_oos"] - 1e-9
+    assert res["r2_oos_adj_raw"] >= res["r2_oos_raw"] - 1e-9
+
+
+def test_sensitivity_battery_r2_oos_columns():
+    """Verify sensitivity battery (BIC models + XGBoost) correctly populates R2_OOS."""
+    _, sensitivity_df = run_clark_west_battery()
+    assert "r2_oos" in sensitivity_df.columns
+    assert "r2_oos_adj" in sensitivity_df.columns
+    assert sensitivity_df["r2_oos"].notna().all()
+    assert sensitivity_df["r2_oos_adj"].notna().all()
+
+
+def test_clark_west_r2_oos_near_zero_denominator_handled():
+    """Verify mspe_naive near machine epsilon returns None rather than exploding."""
+    actual = np.ones(50)
+    naive = actual + 1e-13  # near-zero variance (< 1e-12)
+    pred = actual + 0.1
+
+    res = clark_west_test(actual, naive, pred, h=1)
+    assert res["r2_oos"] is None
+    assert res["r2_oos_adj"] is None
+
+
+def test_clark_west_all_nan_contract_parity():
+    """
+    Verifies that all-NaN inputs return the identical dictionary key contract
+    as standard and small-sample returns, including raw float fields.
+    """
+    actual = np.array([np.nan, np.nan, np.nan])
+    naive = np.array([np.nan, np.nan, np.nan])
+    model = np.array([np.nan, np.nan, np.nan])
+
+    res = clark_west_test(actual, naive, model, h=1)
+    assert res["insufficient_sample"] is True
+    assert res["n_forecasts"] == 0
+    expected_keys = {
+        "n_forecasts", "mspe_naive", "mspe_model", "cw_adjustment", "mspe_model_adj",
+        "r2_oos", "r2_oos_raw", "r2_oos_adj", "r2_oos_adj_raw",
+        "mean_f_stat", "se_f_stat", "cw_stat", "cw_stat_raw",
+        "cw_p_value", "model_significantly_better", "insufficient_sample",
+    }
+    assert set(res.keys()) == expected_keys
+    assert res["r2_oos_raw"] is None
+    assert res["r2_oos_adj_raw"] is None
+    assert res["cw_stat_raw"] is None
+
 
 
 

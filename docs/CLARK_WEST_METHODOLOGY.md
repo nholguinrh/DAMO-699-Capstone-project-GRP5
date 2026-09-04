@@ -68,27 +68,52 @@ $$CW = \frac{\bar{f}}{\sqrt{\text{Var}_{\text{adj}}(\bar{f})}}$$
 with one-sided $p$-value:
 $$p = 1 - \Phi(CW)$$
 
+### 2.4 Out-of-Sample $R^2$ ($R^2_{OOS}$) and the Clark-West Noise-Adjustment Testing Construct
+To evaluate whether a forecasting model delivers economic value relative to the benchmark, the literature (Campbell & Thompson, 2008; Welch & Goyal, 2008; Rapach, Strauss, & Zhou, 2010) defines the realized Out-of-Sample $R^2$:
+
+1. **Realized Out-of-Sample $R^2$ ($R^2_{OOS}$):**
+   $$R^2_{OOS} = 1 - \frac{\text{MSPE}_{\text{model}}}{\text{MSPE}_{\text{naive}}}$$
+   $R^2_{OOS} > 0$ indicates that the forecasting model produces a lower mean squared prediction error than the Naïve benchmark in actual out-of-sample forecasting. This is the **sole metric of realized forecast accuracy**.
+
+2. **Clark-West Noise-Adjusted Testing Construct in MSPE Space ($\bar{f} / \text{MSPE}_{\text{naive}}$):**
+   $$R^2_{OOS,\text{adj}} = 1 - \frac{\text{MSPE}_{\text{model}}^{\text{adj}}}{\text{MSPE}_{\text{naive}}} = \frac{\bar{f}}{\text{MSPE}_{\text{naive}}}$$
+   where $\text{MSPE}_{\text{model}}^{\text{adj}} = \text{MSPE}_{\text{model}} - \text{adj}$. 
+   
+   **Important Methodological Caveat:** As emphasized by Clark & West (2006, 2007) and Rapach et al. (2010), $\text{MSPE}_{\text{model}} - \text{adj}$ is **not an estimate of loss that a forecaster actually experiences**. The term $\text{adj} = \frac{1}{N}\sum (\hat{y}_1 - \hat{y}_2)^2$ is an analytical device designed to center the loss differential under the null hypothesis ($H_0$) so that the resulting $t$-statistic ($CW$) is asymptotically standard normal. Consequently, $R^2_{OOS,\text{adj}}$ is purely a **hypothesis testing construct in MSPE space**, not an achievable or realized reduction in forecast error. It must never be interpreted or presented as realized out-of-sample predictive power.
+
+#### Theoretical Foundation of the Unadjusted Benchmark Denominator
+In nested model evaluation, Model 1 (Naïve Random Walk: $\Delta s_{t+h} = 0$) is a **parameter-free benchmark** with zero estimated parameters. Consequently, its parameter estimation noise penalty is strictly zero ($\text{adj}_1 \equiv 0$), which implies:
+$$\text{MSPE}_1^{\text{adj}} \equiv \text{MSPE}_1$$
+Therefore, the denominator is unambiguously the unadjusted benchmark MSPE ($\text{MSPE}_{\text{naive}}$). Dividing the Clark-West adjusted loss differential $\bar{f} = \text{MSPE}_1 - \text{MSPE}_2^{\text{adj}}$ by $\text{MSPE}_1$ is the mathematically exact sample analog to the proportion of benchmark forecast error variance explained by the model after correcting for parameter estimation noise (Clark & West 2006, 2007; Campbell & Thompson 2008).
+
+#### Numerical Precision & Floating-Point Convention
+All metric computations inside `src/model_comparison.py` are executed directly on full 64-bit double-precision (`float64`) prediction error arrays per IEEE 754 standards to prevent compounding rounding error (*rounding error propagation*). CSV outputs are rounded to 6 decimal places for disk serialization, and dashboard tables format values to 2 decimal places. 
+*Note on hand calculation:* Computing $R^2_{OOS}$ from pre-rounded 6-decimal CSV text for VECM at $h=20$ yields $1 - (0.015349 / 0.015639) = 0.018543 \rightarrow +1.85\%$, whereas exact double-precision computation yields $0.018561 \rightarrow +1.86\%$. The project standardizes on the unrounded double-precision calculation to avoid truncation bias.
+
+#### Methodological Partitioning of Sensitivity Analyses
+The companion BIC specifications (`outputs/clark_west_sensitivity_results.csv`, testing ARIMA-BIC and VAR-BIC) are deliberately partitioned from the primary dashboard presentation. Maintaining the primary evaluation matrix at $m = 12$ hypothesis tests (4 models $\times$ 3 horizons) prevents multiplicity inflation and avoids artificially diluting the Benjamini-Hochberg (1995) FDR budget. The sensitivity battery is preserved for offline audit in notebook `04_diagnostics/clark_west_comparison.ipynb` (Section 5).
+
 ---
 
 ## 3. Empirical Results: The 12-Test Battery
 
-The evaluation matrix comprises **4 primary model paradigms × 3 horizons = 12 hypothesis tests** on the canonical 745–750 business-day origin calendar ($2012\text{--}2026$).
+The evaluation matrix comprises **4 primary model paradigms × 3 horizons = 12 hypothesis tests** on the canonical 745–750 rolling forecast origins sampled across the 2012–2026 historical span.
 
 ### Table 1: Primary 12-Test Clark-West Results vs. Naïve Benchmark
-| Model | Horizon ($h$) | $N$ | $\text{MSPE}_{\text{naive}}$ | $\text{MSPE}_{\text{model}}$ | CW Adj ($\|\hat{y}_1 - \hat{y}_2\|^2$) | $\text{MSPE}_{\text{model}}^{\text{adj}}$ | $CW$ Stat | $p_{\text{raw}}$ | $q_{\text{global}}$ (BH) | $q_{\text{horizon}}$ (BH) |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **ARIMA-AIC** | 1 day | 750 | 0.000841 | 0.000847 | 0.000006 | 0.000841 | -0.080 | 0.5318 | 0.7871 | 0.8309 |
-| **ARIMA-AIC** | 5 days | 750 | 0.003741 | 0.003828 | 0.000065 | 0.003764 | -0.614 | 0.7305 | 0.7969 | 0.7305 |
-| **ARIMA-AIC** | 20 days | 750 | 0.015639 | 0.016423 | 0.000605 | 0.015818 | -0.401 | 0.6559 | 0.7871 | 0.6559 |
-| **VAR-AIC** | 1 day | 750 | 0.000841 | 0.000887 | 0.000042 | 0.000846 | -0.314 | 0.6232 | 0.7871 | 0.8309 |
-| **VAR-AIC** | 5 days | 750 | 0.003741 | 0.004050 | 0.000297 | 0.003753 | -0.123 | 0.5490 | 0.7871 | 0.7305 |
-| **VAR-AIC** | 20 days | 750 | 0.015639 | 0.015832 | 0.000949 | 0.014883 | +0.967 | 0.1667 | 0.6230 | 0.2973 |
-| **VECM (6-var)** | 1 day | 750 | 0.000841 | 0.000884 | 0.000050 | 0.000834 | +0.452 | 0.3257 | 0.6514 | 0.8309 |
-| **VECM (6-var)** | 5 days | 750 | 0.003741 | 0.004033 | 0.000360 | 0.003673 | +0.644 | 0.2596 | 0.6230 | 0.5192 |
-| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | 0.001910 | **0.013439** | **+1.968** | **0.0245** | 0.2940 | 0.0980 |
-| **LSTM (Tuned)** | 1 day | 745 | 0.000843 | 0.000853 | 0.000004 | 0.000849 | -1.390 | 0.9177 | 0.9177 | 0.9177 |
-| **LSTM (Tuned)** | 5 days | 745 | 0.003754 | 0.003761 | 0.000057 | **0.003705** | **+1.577** | **0.0574** | 0.3444 | 0.2296 |
-| **LSTM (Tuned)** | 20 days | 745 | 0.015702 | 0.016014 | 0.000668 | 0.015347 | +0.762 | 0.2230 | 0.6230 | 0.2973 |
+| Model | Horizon ($h$) | $N$ | $\text{MSPE}_{\text{naive}}$ | $\text{MSPE}_{\text{model}}$ | $R^2_{OOS}$ (Realized) | CW Adj ($\|\hat{y}_1 - \hat{y}_2\|^2$) | $\text{MSPE}_{\text{model}}^{\text{adj}}$ | CW Testing Construct ($\bar{f}/\text{MSPE}_1$) | $CW$ Stat | $p_{\text{raw}}$ | $q_{\text{global}}$ (BH) | $q_{\text{horizon}}$ (BH) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **ARIMA-AIC** | 1 day | 750 | 0.000841 | 0.000847 | -0.71% | 0.000006 | 0.000841 | -0.05% | -0.080 | 0.5318 | 0.7871 | 0.8309 |
+| **ARIMA-AIC** | 5 days | 750 | 0.003741 | 0.003828 | -2.34% | 0.000065 | 0.003764 | -0.61% | -0.614 | 0.7305 | 0.7969 | 0.7305 |
+| **ARIMA-AIC** | 20 days | 750 | 0.015639 | 0.016423 | -5.01% | 0.000605 | 0.015818 | -1.14% | -0.401 | 0.6559 | 0.7871 | 0.6559 |
+| **VAR-AIC** | 1 day | 750 | 0.000841 | 0.000887 | -5.51% | 0.000042 | 0.000846 | -0.56% | -0.314 | 0.6232 | 0.7871 | 0.8309 |
+| **VAR-AIC** | 5 days | 750 | 0.003741 | 0.004050 | -8.27% | 0.000297 | 0.003753 | -0.33% | -0.123 | 0.5490 | 0.7871 | 0.7305 |
+| **VAR-AIC** | 20 days | 750 | 0.015639 | 0.015832 | -1.23% | 0.000949 | 0.014883 | +4.84% | +0.967 | 0.1667 | 0.6230 | 0.2973 |
+| **VECM (6-var)** | 1 day | 750 | 0.000841 | 0.000884 | -5.09% | 0.000050 | 0.000834 | +0.86% | +0.452 | 0.3257 | 0.6514 | 0.8309 |
+| **VECM (6-var)** | 5 days | 750 | 0.003741 | 0.004033 | -7.82% | 0.000360 | 0.003673 | +1.82% | +0.644 | 0.2596 | 0.6230 | 0.5192 |
+| **VECM (6-var)** | 20 days | 750 | 0.015639 | 0.015349 | +1.86% | 0.001910 | 0.013439 | +14.07% | +1.968 | 0.0245 | 0.2940 | 0.0980 |
+| **LSTM (Tuned)** | 1 day | 745 | 0.000843 | 0.000853 | -1.23% | 0.000004 | 0.000849 | -0.70% | -1.390 | 0.9177 | 0.9177 | 0.9177 |
+| **LSTM (Tuned)** | 5 days | 745 | 0.003754 | 0.003761 | -0.19% | 0.000057 | 0.003705 | +1.32% | +1.577 | 0.0574 | 0.3444 | 0.2296 |
+| **LSTM (Tuned)** | 20 days | 745 | 0.015702 | 0.016014 | -1.99% | 0.000668 | 0.015347 | +2.26% | +0.762 | 0.2230 | 0.6230 | 0.2973 |
 
 *Data Source: `outputs/clark_west_test_results.csv` generated by `src/model_comparison.py`.*
 

@@ -421,9 +421,14 @@ def clark_west_test(
             "mspe_model": None,
             "cw_adjustment": None,
             "mspe_model_adj": None,
+            "r2_oos": None,
+            "r2_oos_raw": None,
+            "r2_oos_adj": None,
+            "r2_oos_adj_raw": None,
             "mean_f_stat": None,
             "se_f_stat": None,
             "cw_stat": None,
+            "cw_stat_raw": None,
             "cw_p_value": None,
             "model_significantly_better": False,
             "insufficient_sample": True,
@@ -445,9 +450,14 @@ def clark_west_test(
             "mspe_model": None,
             "cw_adjustment": None,
             "mspe_model_adj": None,
+            "r2_oos": None,
+            "r2_oos_raw": None,
+            "r2_oos_adj": None,
+            "r2_oos_adj_raw": None,
             "mean_f_stat": None,
             "se_f_stat": None,
             "cw_stat": None,
+            "cw_stat_raw": None,
             "cw_p_value": None,
             "model_significantly_better": False,
             "insufficient_sample": True,
@@ -499,8 +509,13 @@ def clark_west_test(
     cw_p_value = float(stats.norm.sf(cw_stat))
 
     model_better = bool(cw_p_value < alpha and cw_stat > 0)
-    r2_oos = float(1.0 - (mspe_2 / mspe_1)) if mspe_1 > 0 else 0.0
-    r2_oos_adj = float(f_bar / mspe_1) if mspe_1 > 0 else 0.0
+    EPS = 1e-12
+    if mspe_1 > EPS:
+        r2_oos = float(1.0 - (mspe_2 / mspe_1))
+        r2_oos_adj = float(f_bar / mspe_1)
+    else:
+        r2_oos = None
+        r2_oos_adj = None
 
     return {
         "n_forecasts": n_valid,
@@ -508,8 +523,10 @@ def clark_west_test(
         "mspe_model": round(mspe_2, 6),
         "cw_adjustment": round(adj, 6),
         "mspe_model_adj": round(mspe_2_adj, 6),
-        "r2_oos": round(r2_oos, 6),
-        "r2_oos_adj": round(r2_oos_adj, 6),
+        "r2_oos": round(r2_oos, 6) if r2_oos is not None else None,
+        "r2_oos_raw": r2_oos,
+        "r2_oos_adj": round(r2_oos_adj, 6) if r2_oos_adj is not None else None,
+        "r2_oos_adj_raw": r2_oos_adj,
         "mean_f_stat": round(f_bar, 6),
         "se_f_stat": round(se_f, 6),
         "cw_stat": round(cw_stat, 3),
@@ -614,31 +631,29 @@ def run_clark_west_battery(
 
 
     def _evaluate_models(model_list: list[tuple[str, str, str]]) -> pd.DataFrame:
+        # Cache horizon slices to avoid repeated boolean indexing
+        core_by_h = {h: core[core["horizon"] == h] for h in HORIZONS}
+        vecm_by_h = {h: vecm[vecm["horizon"] == h] for h in HORIZONS}
+        lstm_by_h = {h: m_lstm[m_lstm["horizon"] == h] for h in HORIZONS}
+        xgb_by_h = {h: m_xgb[m_xgb["horizon"] == h] for h in HORIZONS} if m_xgb is not None else {}
+
         records = []
         for col_name, display_name, source in model_list:
             for h in HORIZONS:
                 if source == "core":
-                    df_sub = core[core["horizon"] == h]
-                    act = df_sub["actual"].to_numpy()
-                    naive = df_sub["naive"].to_numpy()
-                    pred = df_sub[col_name].to_numpy()
+                    df_sub = core_by_h[h]
                 elif source == "vecm":
-                    df_sub = vecm[vecm["horizon"] == h]
-                    act = df_sub["actual"].to_numpy()
-                    naive = df_sub["naive"].to_numpy()
-                    pred = df_sub[col_name].to_numpy()
+                    df_sub = vecm_by_h[h]
                 elif source == "lstm":
-                    df_sub = m_lstm[m_lstm["horizon"] == h]
-                    act = df_sub["actual"].to_numpy()
-                    naive = df_sub["naive"].to_numpy()
-                    pred = df_sub[col_name].to_numpy()
+                    df_sub = lstm_by_h[h]
                 elif source == "xgboost":
-                    df_sub = m_xgb[m_xgb["horizon"] == h]
-                    act = df_sub["actual"].to_numpy()
-                    naive = df_sub["naive"].to_numpy()
-                    pred = df_sub[col_name].to_numpy()
+                    df_sub = xgb_by_h[h]
                 else:
                     raise ValueError(f"Unknown source {source}")
+
+                act = df_sub["actual"].to_numpy()
+                naive = df_sub["naive"].to_numpy()
+                pred = df_sub[col_name].to_numpy()
 
                 res = clark_west_test(act, naive, pred, h=h, alpha=alpha)
                 rec = {
