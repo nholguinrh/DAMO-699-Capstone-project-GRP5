@@ -62,7 +62,22 @@ def load_xgboost_forecasts() -> pd.DataFrame | None:
 # =========================================================
 
 def load_clark_west_results() -> pd.DataFrame:
-    return _read_csv("clark_west_test_results.csv")
+    df = _read_csv("clark_west_test_results.csv")
+    sens_path = OUTPUTS_DIR / "clark_west_sensitivity_results.csv"
+    if sens_path.exists():
+        sens_df = pd.read_csv(sens_path)
+        xgb_df = sens_df[sens_df["model_key"] == "xgboost"].copy()
+        if not xgb_df.empty:
+            xgb_df["model"] = "XGBoost"
+            df = pd.concat([df, xgb_df], ignore_index=True)
+    return df
+
+
+def load_clark_west_sensitivity_results() -> pd.DataFrame | None:
+    path = OUTPUTS_DIR / "clark_west_sensitivity_results.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
 
 
 def load_arima_metrics() -> pd.DataFrame:

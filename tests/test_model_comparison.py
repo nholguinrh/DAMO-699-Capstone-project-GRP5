@@ -528,6 +528,20 @@ def test_forecast_error_distribution_missing_column_resilience():
     assert fig_violin is not None
 
 
+def test_dashboard_clark_west_summary_includes_xgboost():
+    """Assert dashboard get_clark_west_summary directly includes XGBoost under canonical name."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
+    from data_loader import get_clark_west_summary
+
+    for h in [1, 5, 20]:
+        cw = get_clark_west_summary(h)
+        models = set(cw["model"])
+        assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
+        assert "XGBoost (Experimental)" not in models, "Model name should be strictly 'XGBoost'"
+
+
 def test_clark_west_r2_oos_mathematical_consistency():
     """
     Tests that R2_OOS and R2_OOS_adj strictly satisfy Campbell & Thompson (2008)
