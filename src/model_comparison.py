@@ -395,11 +395,16 @@ def interval_coverage_summary(
         for level in sorted(lower_cols):
             lo = sub[lower_cols[level]].to_numpy()
             hi = sub[upper_cols[level]].to_numpy()
-            covered = (actual >= lo) & (actual <= hi)
+            # (actual >= lo) & (actual <= hi) is False, not NaN, when any of
+            # the three is NaN -- comparisons against NaN never raise, so an
+            # incomplete origin would otherwise silently dilute the coverage
+            # rate and interval width instead of being excluded from them.
+            valid = np.isfinite(actual) & np.isfinite(lo) & np.isfinite(hi)
+            covered = (actual[valid] >= lo[valid]) & (actual[valid] <= hi[valid])
             tag = str(int(level)) if float(level).is_integer() else str(level)
             row[f"target_nominal_{tag}"] = float(level)
             row[f"empirical_coverage_{tag}"] = round(float(np.mean(covered) * 100.0), 2)
-            row[f"mean_interval_width_{tag}"] = round(float(np.mean(hi - lo)), 4)
+            row[f"mean_interval_width_{tag}"] = round(float(np.mean(hi[valid] - lo[valid])), 4)
         rows.append(row)
 
     return pd.DataFrame(rows).sort_values(horizon_col).reset_index(drop=True)

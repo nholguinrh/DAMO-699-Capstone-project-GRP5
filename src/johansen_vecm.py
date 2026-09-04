@@ -381,14 +381,17 @@ def evaluate_vecm(
             # negative diagonal entry (floating-point cancellation -- the
             # same failure mode cumulative_var_level_interval() guards
             # against explicitly) can silently produce NaN bounds with only
-            # a RuntimeWarning, not an exception. Treat that as a failed
-            # origin rather than let a NaN interval quietly deflate the
-            # coverage summary below.
-            if not (
-                np.all(np.isfinite(vecm_lo_90)) and np.all(np.isfinite(vecm_hi_90))
-                and np.all(np.isfinite(vecm_lo_95)) and np.all(np.isfinite(vecm_hi_95))
-            ):
-                raise ValueError("non-finite VECM prediction interval bound")
+            # a RuntimeWarning, not an exception. Point forecasts don't take
+            # a sqrt() of that covariance and are unaffected, so rather than
+            # discarding the whole origin (which would also drop VAR-AIC,
+            # VAR-BIC, and Naive point forecasts and shrink the paired DM
+            # sample), clamp any non-finite bound to the point forecast --
+            # a zero-width interval at that cell, which correctly reads as
+            # "band did not cover" rather than silently deflating coverage.
+            vecm_lo_90 = np.where(np.isfinite(vecm_lo_90), vecm_lo_90, vecm_fc)
+            vecm_hi_90 = np.where(np.isfinite(vecm_hi_90), vecm_hi_90, vecm_fc)
+            vecm_lo_95 = np.where(np.isfinite(vecm_lo_95), vecm_lo_95, vecm_fc)
+            vecm_hi_95 = np.where(np.isfinite(vecm_hi_95), vecm_hi_95, vecm_fc)
         except (ValueError, np.linalg.LinAlgError, IndexError):
             n_failed += 1
             continue
