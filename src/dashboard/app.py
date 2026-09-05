@@ -19,10 +19,15 @@ from src.pipeline_runner import DATE_END as PIPELINE_END_DEFAULT
 from src.pipeline_runner import read_run_status, run_pipeline
 
 ALPHA = 0.05
+# Below this many forecast origins in a window, quartiles/whiskers/KDE are not
+# statistically meaningful (origins are weekly, so a one-month window yields
+# ~4-5; 30 is roughly a two-quarter window).
+MIN_ORIGINS_FOR_DISTRIBUTION = 30
 
 from data_loader import (
     build_common_forecast_dataset,
     build_common_sample_metrics,
+    filter_by_origin_window,
     get_clark_west_summary,
     get_eda_findings,
     get_pipeline_metadata,
@@ -34,6 +39,7 @@ from data_loader import (
     load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
+    window_model_coverage,
 )
 
 from charts import (
@@ -132,27 +138,40 @@ uncertainty_interval = st.sidebar.radio(
 st.sidebar.divider()
 st.sidebar.subheader("Forecast Origin Date Range")
 
+# All three horizons share the same common-sample origin dates today, so
+# bounding the slider off the full (horizon-agnostic) frame is safe; this
+# would need revisiting if a future data change ever let horizons diverge.
 _min_origin_date = forecast_df["origin_date"].min().date()
 _max_origin_date = forecast_df["origin_date"].max().date()
 
-origin_date_range = st.sidebar.slider(
-    "Forecast origin date range",
-    min_value=_min_origin_date,
-    max_value=_max_origin_date,
-    value=(_min_origin_date, _max_origin_date),
-    format="YYYY-MM-DD",
-    key="origin_date_range",
-    help=(
-        "Restricts the Forecasts vs. Actuals (Tab 3) and Forecast Error "
-        "Distribution (Tab 5) charts to forecast origins within this window."
-    ),
-)
+if _min_origin_date == _max_origin_date:
+    # st.slider requires min_value < max_value; degrade gracefully instead
+    # of raising if the common sample ever collapses to a single origin.
+    st.sidebar.caption(f"Only one forecast origin available: {_min_origin_date}")
+    _range_start, _range_end = _min_origin_date, _max_origin_date
+    filtered_forecast_df = forecast_df
+else:
+    origin_date_range = st.sidebar.slider(
+        "Forecast origin date range",
+        min_value=_min_origin_date,
+        max_value=_max_origin_date,
+        value=(_min_origin_date, _max_origin_date),
+        format="YYYY-MM-DD",
+        key="origin_date_range",
+        help=(
+            "Restricts the Forecasts vs. Actuals (Tab 3) and Forecast Error "
+            "Distribution (Tab 5) charts to forecast origins within this "
+            "window. Origins are weekly, so short windows can contain very "
+            "few observations -- both tabs disclose the count and warn "
+            "before rendering anything statistically misleading."
+        ),
+    )
+    _range_start, _range_end = origin_date_range
+    filtered_forecast_df = filter_by_origin_window(
+        forecast_df, _range_start, _range_end
+    )
 
-_range_start, _range_end = origin_date_range
-filtered_forecast_df = forecast_df[
-    (forecast_df["origin_date"] >= pd.Timestamp(_range_start))
-    & (forecast_df["origin_date"] <= pd.Timestamp(_range_end))
-]
+_window_label = f"{_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}"
 
 
 
@@ -712,18 +731,39 @@ with tab_performance:
 
     st.subheader("Forecasts vs Actuals")
 
-    if filtered_forecast_df[filtered_forecast_df["horizon"] == horizon].empty:
+    horizon_window_df = filtered_forecast_df[
+        filtered_forecast_df["horizon"] == horizon
+    ]
+
+    if horizon_window_df.empty:
         st.warning(
             f"No forecast origins between {_range_start:%Y-%m-%d} and "
             f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
             "Widen the date range in the sidebar."
         )
     else:
+        _coverage = window_model_coverage(horizon_window_df, MODEL_COLUMNS)
+        _covered_models = set(
+            _coverage.loc[_coverage["n_origins"] > 0, "model"]
+        )
+        _absent_models = [m for m in selected_models if m not in _covered_models]
+        _plot_models = [m for m in selected_models if m in _covered_models]
+
+        if _absent_models:
+            st.info(
+                f"No forecasts available in this window for: "
+                f"{', '.join(_absent_models)}. They are omitted below -- "
+                "this reflects missing coverage, not zero error."
+            )
+
         forecast_fig = create_forecast_vs_actual_chart(
             filtered_forecast_df,
             horizon=horizon,
-            selected_models=selected_models,
-            uncertainty_interval=uncertainty_interval,
+            selected_models=_plot_models,
+            uncertainty_interval=(
+                uncertainty_interval if "XGBoost" in _plot_models else "None"
+            ),
+            window_label=_window_label,
         )
 
         st.plotly_chart(
@@ -731,10 +771,19 @@ with tab_performance:
             use_container_width=True,
         )
 
+        st.caption(
+            f"{len(horizon_window_df)} forecast origin(s) shown at the "
+            f"{horizon}-day horizon; realized outcomes plotted extend "
+            f"{horizon} trading day(s) beyond {_range_end:%Y-%m-%d}."
+        )
+
     st.caption(
-        f"Cross-model comparisons use the {pipeline_metadata['common_origins_per_horizon']} forecast origins "
-        "shared simultaneously across the core models and available benchmarks, "
-        f"filtered to {_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}."
+        f"The RMSE / MAE comparison above and the regime table below are "
+        f"computed once over the **full** common sample of "
+        f"{pipeline_metadata['common_origins_per_horizon']} forecast origins "
+        "per horizon, shared simultaneously across the core models and "
+        "available benchmarks -- they are **not** affected by the sidebar "
+        "date range."
     )
 
     if regime_metrics_df is not None:
@@ -912,31 +961,67 @@ with tab_errors:
         horizontal=True,
     )
 
-    if filtered_forecast_df[filtered_forecast_df["horizon"] == horizon].empty:
+    horizon_window_df = filtered_forecast_df[
+        filtered_forecast_df["horizon"] == horizon
+    ]
+
+    if horizon_window_df.empty:
         st.warning(
             f"No forecast origins between {_range_start:%Y-%m-%d} and "
             f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
             "Widen the date range in the sidebar."
         )
     else:
-        error_fig = (
-            create_forecast_error_distribution(
+        _coverage = window_model_coverage(horizon_window_df, MODEL_COLUMNS)
+        _absent_models = _coverage.loc[
+            _coverage["n_origins"] == 0, "model"
+        ].tolist()
+        _present = _coverage.loc[_coverage["n_origins"] > 0]
+
+        if _absent_models:
+            st.info(
+                f"No forecasts available in this window for: "
+                f"{', '.join(_absent_models)}. They are omitted from the "
+                "chart below -- this reflects missing coverage, not zero "
+                "error."
+            )
+
+        if not _present.empty and _present["n_origins"].nunique() > 1:
+            st.warning(
+                "Models do not share the same number of forecast origins "
+                f"in this window ({_present.set_index('model')['n_origins'].to_dict()}). "
+                "Comparing these distributions is **not a paired "
+                "comparison** -- interpret differences in level and "
+                "spread with caution."
+            )
+
+        _max_n = int(_present["n_origins"].max()) if not _present.empty else 0
+        if _max_n < MIN_ORIGINS_FOR_DISTRIBUTION:
+            st.warning(
+                f"Only {_max_n} forecast origin(s) fall in this window at "
+                f"the {horizon}-day horizon (fewer than "
+                f"{MIN_ORIGINS_FOR_DISTRIBUTION}). Quartiles, whiskers, and "
+                "the violin density are not statistically meaningful at "
+                "this sample size, so the chart is not shown -- widen the "
+                "date range in the sidebar."
+            )
+        else:
+            error_fig = create_forecast_error_distribution(
                 filtered_forecast_df,
                 horizon=horizon,
                 chart_type=error_chart_type,
+                window_label=_window_label,
             )
-        )
 
-        st.plotly_chart(
-            error_fig,
-            use_container_width=True,
-        )
+            st.plotly_chart(
+                error_fig,
+                use_container_width=True,
+            )
 
     st.caption(
         "Forecast error = Actual − Forecast. "
         "Distributions help reveal bias, dispersion, "
-        "and extreme forecast errors. "
-        f"Filtered to {_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}."
+        "and extreme forecast errors."
     )
 
 

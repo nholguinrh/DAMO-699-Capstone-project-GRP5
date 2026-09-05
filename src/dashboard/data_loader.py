@@ -1,4 +1,5 @@
 import sys
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -283,6 +284,48 @@ def build_common_forecast_dataset() -> pd.DataFrame:
         common[out_cols]
         .sort_values(["horizon", "origin_date"])
         .reset_index(drop=True)
+    )
+
+
+# =========================================================
+# ORIGIN-WINDOW FILTERING (sidebar date-range slider)
+# =========================================================
+
+def filter_by_origin_window(
+    df: pd.DataFrame,
+    start: date,
+    end: date,
+) -> pd.DataFrame:
+    """Restrict a forecast frame to origins in the closed day-range [start, end].
+
+    Implemented as a half-open interval on the underlying timestamps so the
+    final day is retained even if ``origin_date`` ever carries an intraday
+    component (``pd.Timestamp(date)`` normalizes to midnight, which a ``<=``
+    bound would silently exclude). Row order and index are preserved and
+    cardinality is non-increasing.
+    """
+    lo = pd.Timestamp(start)
+    hi = pd.Timestamp(end) + pd.Timedelta(days=1)
+    return df[(df["origin_date"] >= lo) & (df["origin_date"] < hi)]
+
+
+def window_model_coverage(
+    df: pd.DataFrame,
+    model_columns: dict[str, str],
+) -> pd.DataFrame:
+    """Per-model non-null forecast counts within an already-filtered frame.
+
+    Used to disclose which models have zero coverage in a user-selected
+    origin window (e.g. XGBoost's later common-sample start date) and
+    whether the remaining models share a common origin count -- i.e.
+    whether a cross-model comparison in that window is still paired.
+    """
+    return pd.DataFrame(
+        [
+            {"model": name, "n_origins": int(df[col].notna().sum())}
+            for name, col in model_columns.items()
+            if col in df.columns
+        ]
     )
 
 
