@@ -39,6 +39,7 @@ from data_loader import (
     load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
+    get_conformal_disclosure,
     min_covered_origins,
     origin_window_label,
     window_model_coverage,
@@ -47,6 +48,7 @@ from data_loader import (
 
 from charts import (
     MODEL_COLUMNS,
+    XGB_DISPLAY_LABEL,
     create_clark_west_chart,
     create_fevd_chart,
     create_forecast_error_distribution,
@@ -127,15 +129,15 @@ selected_models = st.sidebar.multiselect(
         "VAR",
         "VECM",
         "LSTM",
-        "XGBoost",
+        XGB_DISPLAY_LABEL,
     ],
 )
 
 uncertainty_interval = st.sidebar.radio(
-    "XGBoost Uncertainty Ribbon",
+    f"{XGB_DISPLAY_LABEL} Uncertainty Ribbon",
     options=["None", "90%", "95%"],
     horizontal=True,
-    help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
+    help=get_conformal_disclosure(),
 )
 
 st.sidebar.divider()
@@ -565,11 +567,11 @@ Statistics Canada API ──┘           ↓
             "Key Mechanism / Specification": "32 hidden units, AdamW optimizer, early stopping, sequence temporal memory",
         },
         {
-            "Model": "XGBoost",
+            "Model": XGB_DISPLAY_LABEL,
             "Family": "Tree-Based Machine Learning",
             "Target Formulation": "Cumulative Diff Delta_h y",
             "Information Set": "50 causal lag / rolling features",
-            "Key Mechanism / Specification": "Gradient Boosted Trees (150 estimators, depth 3, lr 0.03) + Tree SHAP + Conformal PIs",
+            "Key Mechanism / Specification": "Gradient Boosted Trees (600 estimators, depth 2, lr 0.01) + Tree SHAP + Conformal PIs",
         },
     ])
 

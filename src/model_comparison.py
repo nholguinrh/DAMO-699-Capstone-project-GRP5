@@ -68,7 +68,7 @@ from dieboldmariano import (
 from statsmodels.stats.multitest import multipletests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project_paths import OUTPUTS_DIR as OUT_DIR  # noqa: E402
+from project_paths import OUTPUTS_DIR as OUT_DIR, PROCESSED_DIR, PROJECT_ROOT, write_data_manifest  # noqa: E402
 
 ALPHA = 0.05
 HORIZONS = [1, 5, 20]
@@ -789,7 +789,7 @@ def run_clark_west_battery(
         ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if m_xgb is not None:
-        primary_models.append(("xgboost", "XGBoost", "xgboost"))
+        primary_models.append(("xgboost", "XGBoost (Tuned)", "xgboost"))
 
     sensitivity_models = [
         ("arima_bic", "ARIMA-BIC", "core"),
@@ -958,7 +958,7 @@ def evaluate_regime_segmentation(
         ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if has_xgb and m_xgb is not None:
-        models_to_eval.append(("xgboost", "XGBoost", "xgboost"))
+        models_to_eval.append(("xgboost", "XGBoost (Tuned)", "xgboost"))
 
     records = []
     for regime_name, start_date, end_date in REGIMES:
@@ -1066,6 +1066,15 @@ def export_all_model_comparisons(output_dir: Path | None = None) -> None:
 
     regime_df = evaluate_regime_segmentation(output_path=out / "r3_regime_segmented_metrics.csv")
     logger.info("Saved Regime Segmentation metrics (%d rows) to %s", len(regime_df), out)
+
+    input_files = [
+        PROCESSED_DIR / "gold_features.csv",
+        PROCESSED_DIR / "bank_of_canada_data.csv",
+        PROCESSED_DIR / "fred_rates.csv",
+        PROCESSED_DIR / "statcan_cpi.csv",
+    ]
+    write_data_manifest(input_files, out / "data_manifest.json")
+    logger.info("Saved input data manifest to %s", out / "data_manifest.json")
 
 
 if __name__ == "__main__":

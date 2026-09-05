@@ -11,9 +11,9 @@ Regime 1: Rapid Tightening & Inversion,VECM (6-var),vecm,20,52,True,0.16708,0.15
 Regime 1: Rapid Tightening & Inversion,LSTM (Tuned),lstm,1,52,False,0.03966,0.03944,-0.549,0.03053,0.03019,-1.103,-0.011015,-0.007627,-0.424,0.6643,False
 Regime 1: Rapid Tightening & Inversion,LSTM (Tuned),lstm,5,52,False,0.0818,0.08198,0.217,0.06482,0.06596,1.73,0.004341,0.0128,0.803,0.211,False
 Regime 1: Rapid Tightening & Inversion,LSTM (Tuned),lstm,20,52,True,0.16569,0.15971,-3.749,0.13126,0.12635,-3.893,-0.076391,,,,False
-Regime 1: Rapid Tightening & Inversion,XGBoost,xgboost,1,52,False,0.0402,0.03944,-1.912,0.03087,0.03019,-2.255,-0.038596,-0.024696,-0.702,0.7587,False
-Regime 1: Rapid Tightening & Inversion,XGBoost,xgboost,5,52,False,0.08484,0.08198,-3.485,0.06689,0.06596,-1.412,-0.070907,-0.010421,-0.189,0.5749,False
-Regime 1: Rapid Tightening & Inversion,XGBoost,xgboost,20,52,True,0.17024,0.15971,-6.599,0.1365,0.12635,-8.036,-0.136343,,,,False
+Regime 1: Rapid Tightening & Inversion,XGBoost (Tuned),xgboost,1,52,False,0.04136,0.03944,-4.852,0.03088,0.03019,-2.272,-0.099392,-0.06078,-0.787,0.7845,False
+Regime 1: Rapid Tightening & Inversion,XGBoost (Tuned),xgboost,5,52,False,0.08314,0.08198,-1.418,0.06631,0.06596,-0.524,-0.028556,0.024133,0.456,0.3242,False
+Regime 1: Rapid Tightening & Inversion,XGBoost (Tuned),xgboost,20,52,True,0.16961,0.15971,-6.202,0.13482,0.12635,-6.708,-0.127883,,,,False
 Regime 2: Policy Plateau / Higher-for-Longer,ARIMA-AIC,arima_aic,1,22,False,0.04187,0.04183,-0.087,0.02452,0.025,1.903,-0.00174,0.001737,0.07,0.472,False
 Regime 2: Policy Plateau / Higher-for-Longer,ARIMA-AIC,arima_aic,5,22,True,0.07223,0.07157,-0.917,0.05661,0.05591,-1.246,-0.018432,,,,False
 Regime 2: Policy Plateau / Higher-for-Longer,ARIMA-AIC,arima_aic,20,22,True,0.11367,0.10957,-3.751,0.09454,0.09136,-3.473,-0.076426,,,,False
@@ -26,9 +26,9 @@ Regime 2: Policy Plateau / Higher-for-Longer,VECM (6-var),vecm,20,22,True,0.1083
 Regime 2: Policy Plateau / Higher-for-Longer,LSTM (Tuned),lstm,1,22,False,0.04185,0.04183,-0.029,0.0245,0.025,1.984,-0.000583,0.00331,0.208,0.4176,False
 Regime 2: Policy Plateau / Higher-for-Longer,LSTM (Tuned),lstm,5,22,True,0.06889,0.07157,3.754,0.05331,0.05591,4.649,0.073677,,,,False
 Regime 2: Policy Plateau / Higher-for-Longer,LSTM (Tuned),lstm,20,22,True,0.09922,0.10957,9.44,0.0819,0.09136,10.361,0.179891,,,,False
-Regime 2: Policy Plateau / Higher-for-Longer,XGBoost,xgboost,1,22,False,0.0419,0.04183,-0.167,0.02462,0.025,1.531,-0.003343,0.001687,0.074,0.4705,False
-Regime 2: Policy Plateau / Higher-for-Longer,XGBoost,xgboost,5,22,True,0.07178,0.07157,-0.295,0.05442,0.05591,2.664,-0.005915,,,,False
-Regime 2: Policy Plateau / Higher-for-Longer,XGBoost,xgboost,20,22,True,0.11651,0.10957,-6.342,0.09662,0.09136,-5.757,-0.130862,,,,False
+Regime 2: Policy Plateau / Higher-for-Longer,XGBoost (Tuned),xgboost,1,22,False,0.04196,0.04183,-0.307,0.02452,0.025,1.929,-0.00615,-0.003739,-0.144,0.5573,False
+Regime 2: Policy Plateau / Higher-for-Longer,XGBoost (Tuned),xgboost,5,22,True,0.07151,0.07157,0.094,0.05426,0.05591,2.947,0.00188,,,,False
+Regime 2: Policy Plateau / Higher-for-Longer,XGBoost (Tuned),xgboost,20,22,True,0.12134,0.10957,-10.751,0.10148,0.09136,-11.073,-0.22657,,,,False
 Regime 3: Easing Cycle & Un-inversion,ARIMA-AIC,arima_aic,1,104,False,0.02847,0.0284,-0.223,0.01998,0.01971,-1.362,-0.004458,0.000269,0.023,0.4908,False
 Regime 3: Easing Cycle & Un-inversion,ARIMA-AIC,arima_aic,5,104,False,0.04634,0.04475,-3.546,0.03334,0.03183,-4.765,-0.072183,-0.063294,-2.576,0.995,False
 Regime 3: Easing Cycle & Un-inversion,ARIMA-AIC,arima_aic,20,104,False,0.11032,0.10464,-5.422,0.08416,0.07942,-5.97,-0.11137,-0.102419,-1.537,0.9379,False
@@ -41,6 +41,6 @@ Regime 3: Easing Cycle & Un-inversion,VECM (6-var),vecm,20,104,False,0.0954,0.10
 Regime 3: Easing Cycle & Un-inversion,LSTM (Tuned),lstm,1,104,False,0.02874,0.0284,-1.184,0.02022,0.01971,-2.59,-0.023829,-0.018819,-1.408,0.9204,False
 Regime 3: Easing Cycle & Un-inversion,LSTM (Tuned),lstm,5,104,False,0.04436,0.04475,0.875,0.03207,0.03183,-0.779,0.017428,0.049383,1.26,0.1038,False
 Regime 3: Easing Cycle & Un-inversion,LSTM (Tuned),lstm,20,104,False,0.10239,0.10464,2.148,0.07736,0.07942,2.601,0.042495,0.114089,1.03,0.1516,False
-Regime 3: Easing Cycle & Un-inversion,XGBoost,xgboost,1,104,False,0.02844,0.0284,-0.138,0.0199,0.01971,-0.932,-0.002765,0.003493,0.158,0.4372,False
-Regime 3: Easing Cycle & Un-inversion,XGBoost,xgboost,5,104,False,0.04639,0.04475,-3.663,0.03483,0.03183,-9.42,-0.074598,-0.030571,-1.416,0.9216,False
-Regime 3: Easing Cycle & Un-inversion,XGBoost,xgboost,20,104,False,0.11318,0.10464,-8.155,0.0837,0.07942,-5.388,-0.169755,-0.03644,-0.443,0.6711,False
+Regime 3: Easing Cycle & Un-inversion,XGBoost (Tuned),xgboost,1,104,False,0.02857,0.0284,-0.603,0.02012,0.01971,-2.077,-0.012104,-0.00831,-0.502,0.6921,False
+Regime 3: Easing Cycle & Un-inversion,XGBoost (Tuned),xgboost,5,104,False,0.04684,0.04475,-4.669,0.03537,0.03183,-11.126,-0.095561,-0.04485,-2.28,0.9887,False
+Regime 3: Easing Cycle & Un-inversion,XGBoost (Tuned),xgboost,20,104,False,0.11465,0.10464,-9.565,0.08457,0.07942,-6.477,-0.200449,-0.117939,-1.298,0.9029,False

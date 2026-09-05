@@ -416,7 +416,7 @@ def build_common_sample_metrics() -> pd.DataFrame:
         "LSTM (Tuned)": "lstm",
     }
     if "xgboost" in df.columns:
-        model_columns["XGBoost"] = "xgboost"
+        model_columns["XGBoost (Tuned)"] = "xgboost"
 
 
     rows = []
@@ -586,3 +586,27 @@ def load_xgboost_prediction_intervals() -> pd.DataFrame | None:
     if not path.exists():
         return None
     return pd.read_csv(path)
+
+
+@st.cache_data(show_spinner=False)
+def get_conformal_disclosure() -> str:
+    """
+    Render the interval caveat from the shipped artifact so the coverage figures
+    quoted to users can never drift from the numbers the pipeline produced.
+    """
+    path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
+    if not path.exists():
+        return (
+            "Split-conformal empirical prediction intervals for XGBoost. Finite-sample validity "
+            "requires exchangeable residuals, which overlapping h-step targets violate; "
+            "treat as indicative, not guaranteed."
+        )
+    iv = pd.read_csv(path).sort_values("horizon")
+    cov = "/".join(f"{c:.1f}" for c in iv["empirical_coverage_90"])
+    hs = "/".join(str(int(h)) for h in iv["horizon"])
+    return (
+        "Split-conformal empirical prediction intervals for XGBoost. Finite-sample validity "
+        "requires exchangeable residuals, which overlapping h-step targets violate; realized "
+        f"coverage is {cov}% at h={hs} against a 90% nominal target "
+        "(outputs/r3_xgboost_prediction_intervals.csv). Treat as indicative, not guaranteed."
+    )

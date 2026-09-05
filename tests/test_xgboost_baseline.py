@@ -317,9 +317,9 @@ class TestSmokePipeline:
 class TestConformalCalibrationFix:
     """Regression tests for the split-conformal quantile fix (#108).
 
-    Round 1 of this fix (dividing by n_cal + 1 instead of n_cal, then
-    feeding that level to np.quantile's default linear interpolation) was
-    itself wrong: np.quantile's virtual index is p * (n - 1), not
+    An earlier round of this fix (dividing by n_cal + 1 instead of n_cal,
+    then feeding that level to np.quantile's default linear interpolation)
+    was itself wrong: np.quantile's virtual index is p * (n - 1), not
     p * (n + 1), so the "corrected" level lands ~0.8-0.9 order statistics
     below the true k-th one -- narrower intervals, coverage BELOW nominal,
     i.e. worse than the original bug. These tests bind the actual
@@ -328,9 +328,9 @@ class TestConformalCalibrationFix:
 
     def test_conformal_quantile_is_the_exact_order_statistic(self):
         """The k-th smallest calibration residual must be returned exactly.
-        Both the n_cal denominator (#108 original) and the (n_cal + 1)
-        level fed to np.quantile's linear interpolation (#108 round 1) miss
-        this -- this test fails against both."""
+        Both the n_cal denominator (original bug) and the (n_cal + 1) level
+        fed to np.quantile's linear interpolation (a since-reverted "fix")
+        miss this -- this test fails against both."""
         from xgboost_baseline import _conformal_quantile
 
         rng = np.random.RandomState(0)
@@ -340,8 +340,8 @@ class TestConformalCalibrationFix:
                 k = int(np.ceil((n_cal + 1) * q))
                 assert _conformal_quantile(r, q) == pytest.approx(r[k - 1]), \
                     f"n_cal={n_cal} q={q}: must be the {k}-th smallest residual"
-                # Explicit regression guard against the round-1 (n_cal + 1)
-                # level under linear interpolation.
+                # Explicit regression guard against the (n_cal + 1) level
+                # under linear interpolation.
                 assert not np.isclose(
                     _conformal_quantile(r, q),
                     np.quantile(r, min(1.0, k / (n_cal + 1))),
@@ -359,9 +359,8 @@ class TestConformalCalibrationFix:
     def test_empirical_coverage_is_at_or_above_nominal_under_exchangeability(self):
         """Distribution-free guarantee: with exchangeable calibration and
         test scores, split-conformal coverage is >= nominal. This is the
-        assertion that would have caught the original #108 bug (coverage
-        below nominal) and would equally catch an over-corrected fix
-        (coverage still below nominal, just less so)."""
+        assertion that would catch a below-nominal-coverage regression,
+        whether from the original bug or an over/under-corrected fix."""
         from xgboost_baseline import _conformal_quantile
 
         rng = np.random.RandomState(1)
@@ -376,4 +375,53 @@ class TestConformalCalibrationFix:
                 f"n_cal={n_cal} q={q}: empirical {cov:.3f} below nominal"
 
 
+# ---------------------------------------------------------------------------
+# Test 7: Hyperparameter tuning contracts (Issue #119)
+# ---------------------------------------------------------------------------
 
+class TestHyperparameterTuningParity:
+    """Verify hyperparameter configuration constants and model factory support."""
+
+    def test_create_model_supports_min_child_weight(self):
+        from xgboost_baseline import create_model, HAS_XGBOOST
+
+        model = create_model(min_child_weight=5.0)
+        if HAS_XGBOOST:
+            assert model.get_params()["min_child_weight"] == 5.0
+        else:
+            # Fallback must instantiate without error
+            assert hasattr(model, "fit")
+
+    def test_run_rolling_cv_accepts_tuned_parameters(self, synthetic_gold_df):
+        from xgboost_baseline import run_rolling_cv
+
+        forecasts_df, metrics_df, _ = run_rolling_cv(
+            synthetic_gold_df,
+            lags=[1, 2],
+            horizons=[1],
+            min_train=36,
+            n_folds=2,
+            n_estimators=5,
+            max_depth=2,
+            learning_rate=0.05,
+            subsample=0.7,
+            colsample_bytree=0.7,
+            min_child_weight=2.0,
+            reg_lambda=2.0,
+        )
+        assert len(forecasts_df) > 0
+        assert len(metrics_df) > 0
+
+    def test_shipped_intervals_within_disclosed_miscoverage_budget(self):
+        """
+        Nominal-90% coverage must not fall below 83% on the shipped artifact (M-3).
+        Finite-sample validity is void under h-step overlap; this bounds empirical damage.
+        """
+        from project_paths import OUTPUTS_DIR
+        iv_path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
+        if not iv_path.exists():
+            pytest.skip("outputs/r3_xgboost_prediction_intervals.csv does not exist yet")
+        iv = pd.read_csv(iv_path)
+        assert (iv["empirical_coverage_90"] >= 83.0).all()
+        assert (iv["empirical_coverage_95"] >= 90.0).all()
+        assert (iv["empirical_coverage_95"] > iv["empirical_coverage_90"]).all()

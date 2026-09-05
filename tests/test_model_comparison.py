@@ -412,14 +412,14 @@ def test_run_clark_west_battery_smoke(clark_west_battery_results):
     # Unified primary battery is 5 models x 3 horizons = 15 rows (m=15) with canonical names
     assert len(primary_df) == 15
     assert set(primary_df["horizon"]) == {1, 5, 20}
-    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost"}
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost (Tuned)"}
 
     # Sensitivity battery contains strictly 2 BIC models (6 rows)
     assert len(sensitivity_df) == 6
     assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
-    # Reconciled common sample: exactly 741 origin dates across all arms
-    assert (primary_df["n_forecasts"] == 741).all()
+    # Reconciled common sample: exactly 745 origin dates across all arms
+    assert (primary_df["n_forecasts"] == 745).all()
 
     # Verify no NaN test statistics
     assert primary_df["cw_stat"].notna().all()
@@ -434,6 +434,25 @@ def test_run_clark_west_battery_smoke(clark_west_battery_results):
     assert primary_df["r2_oos_adj"].notna().all()
 
 
+OUT_DIR = project_root / "outputs"
+EXPECTED_GOLD_SHA256 = "91979adb6c3b71a06bde7f58db6ddadc83b4c2e3ebe8783363e6e8709ce84e82"
+
+
+def test_common_sample_size_is_attributable_to_the_recorded_vintage():
+    """`n_forecasts == 745` is only meaningful if we know which inputs produced it.
+    If this fails on the sha but not the count (or vice versa), the vintage moved and
+    the committed outputs must be regenerated in the same commit."""
+    import json
+    manifest_path = OUT_DIR / "data_manifest.json"
+    if not manifest_path.exists():
+        pytest.skip("data_manifest.json not present yet.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "gold_features.csv" in manifest
+    assert manifest["gold_features.csv"]["sha256"] == EXPECTED_GOLD_SHA256
+    cw = pd.read_csv(OUT_DIR / "clark_west_test_results.csv")
+    assert (cw["n_forecasts"] == 745).all()
+
+
 def test_clark_west_primary_battery_fifteen_hypotheses(clark_west_battery_results):
     """Verify unified primary battery contains 5 models x 3 horizons = 15 tests, including XGBoost."""
     primary_df, sensitivity_df = clark_west_battery_results
@@ -444,7 +463,7 @@ def test_clark_west_primary_battery_fifteen_hypotheses(clark_west_battery_result
         "VAR-AIC",
         "VECM (6-var)",
         "LSTM (Tuned)",
-        "XGBoost",
+        "XGBoost (Tuned)",
     }
     # Sensitivity battery contains strictly the 2 BIC specifications
     assert len(sensitivity_df) == 6
@@ -491,6 +510,7 @@ def test_common_sample_metrics_paired_baseline_parity():
         col_map = {
             "ARIMA": "arima_aic", "VAR": "var_aic", "VECM": "vecm", "LSTM": "lstm", "XGBoost": "xgboost",
             "ARIMA-AIC": "arima_aic", "VAR-AIC": "var_aic", "VECM (6-var)": "vecm", "LSTM (Tuned)": "lstm",
+            "XGBoost (Tuned)": "xgboost",
         }
         col = col_map.get(model_name)
         if col is None or col not in forecast_df.columns:
@@ -542,13 +562,25 @@ def test_dashboard_clark_west_summary_includes_xgboost():
     for h in [1, 5, 20]:
         cw = get_clark_west_summary(h)
         models = set(cw["model"])
-        assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
+        assert "XGBoost (Tuned)" in models, f"XGBoost (Tuned) must be directly present in Clark-West summary for h={h}"
         assert len(cw) == 5, f"Each horizon must contain 5 models under unified battery, got {len(cw)}"
 
-        # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
+        # Verify XGBoost's q-value obeys the unified m=15 BH contract, rather than
+        # pinning a literal that has to be rewritten on every regeneration (and so
+        # can never fail for the reason it exists).
         xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
-        expected_q = 0.9127 if h == 1 else (0.2150 if h == 5 else 0.2278)
-        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
+        p, q = xgb_row["cw_p_value"], xgb_row["cw_p_adj_horizon"]
+        assert q >= p - 1e-12, "BH adjustment must be non-decreasing in p"
+        assert q <= 1.0 + 1e-12
+        # Horizon-stratified BH over m=5 models: q_i <= p_i * m / rank_i (by step-up minimum accumulation)
+        ranks = cw["cw_p_value"].rank(method="min")
+        r = float(ranks[cw["model_key"] == "xgboost"].iloc[0])
+        assert q <= p * len(cw) / r + 1e-4, "BH q-value cannot exceed raw step-up multiple"
+        from statsmodels.stats.multitest import multipletests
+        _, expected_qs, _, _ = multipletests(cw["cw_p_value"], method="fdr_bh")
+        mask = (cw["model_key"] == "xgboost").values
+        expected_q = float(expected_qs[mask][0])
+        assert np.isclose(q, expected_q, atol=1e-3)
 
 
 def test_clark_west_r2_oos_mathematical_consistency():

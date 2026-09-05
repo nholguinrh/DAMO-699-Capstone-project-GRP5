@@ -23,14 +23,20 @@ import numpy as np
 import pandas as pd
 import shap
 
-# Ensure src directory is in sys.path
+# Ensure project root and src directory are in sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from gold_feature_pipeline import build_gold_features  # noqa: E402
-from project_paths import PROCESSED_DIR  # noqa: E402
+try:
+    from src.gold_feature_pipeline import build_gold_features  # noqa: E402
+    from src.project_paths import PROCESSED_DIR, write_data_manifest  # noqa: E402
+except ImportError:
+    from gold_feature_pipeline import build_gold_features  # type: ignore # noqa: E402
+    from project_paths import PROCESSED_DIR, write_data_manifest  # type: ignore # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +71,16 @@ SEED = 42
 # this threshold; it only bites in small unit-test fixtures, which fall
 # back to (non-inferential) in-sample residuals below it.
 MIN_FIT_ROWS = 30
+
+# Default hyperparameters (tuned via leakage-safe burn-in search, Issue #119)
+MAX_DEPTH = 2
+LEARNING_RATE = 0.01
+N_ESTIMATORS = 600
+SUBSAMPLE = 1.0
+COLSAMPLE_BYTREE = 1.0
+MIN_CHILD_WEIGHT = 1.0
+REG_LAMBDA = 0.5
+REG_ALPHA = 0.0
 
 # Check for XGBoost availability; provide GradientBoostingRegressor fallback
 try:
@@ -283,13 +299,14 @@ def _conformal_quantile(residuals: np.ndarray, q: float) -> float:
 def create_model(
     loss: str = "squared_error",
     alpha: float | None = None,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
-    subsample: float = 0.8,
-    colsample_bytree: float = 0.8,
-    reg_lambda: float = 1.0,
-    reg_alpha: float = 0.0,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
     random_state: int = SEED,
 ) -> Any:
     """
@@ -306,6 +323,7 @@ def create_model(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
                 random_state=random_state,
@@ -320,6 +338,7 @@ def create_model(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
                 random_state=random_state,
@@ -359,13 +378,14 @@ def run_rolling_cv(
     horizons: list[int] | None = None,
     min_train: int = MIN_TRAIN,
     n_folds: int = N_FOLDS,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
-    subsample: float = 0.8,
-    colsample_bytree: float = 0.8,
-    reg_lambda: float = 1.0,
-    reg_alpha: float = 0.0,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Execute expanding-window rolling CV across all horizons, generating level
@@ -421,6 +441,7 @@ def run_rolling_cv(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
             )
@@ -435,6 +456,13 @@ def run_rolling_cv(
             cal_size = max(int(n_tr * cal_ratio), 20)
             fit_end = n_tr - cal_size - h
 
+            # A calibration set below ~19 rows lets the 95% split-conformal
+            # quantile saturate to the calibration set's max residual, which
+            # would silently produce a degenerate "95% interval" identical to
+            # the 90% one -- so cal_size (already floored at 20 above) is
+            # never reduced to free up more fit rows. The only lever for very
+            # small training blocks is how few fit rows are required before
+            # falling back to in-sample residuals instead (governed by MIN_FIT_ROWS).
             if fit_end >= MIN_FIT_ROWS:
                 fit_data = train_data.iloc[:fit_end]
                 cal_data = train_data.iloc[fit_end + h:]
@@ -446,6 +474,7 @@ def run_rolling_cv(
                     n_estimators=n_estimators,
                     subsample=subsample,
                     colsample_bytree=colsample_bytree,
+                    min_child_weight=min_child_weight,
                     reg_lambda=reg_lambda,
                     reg_alpha=reg_alpha,
                 )
@@ -572,12 +601,21 @@ def compute_tree_shap_interpretability(
     df: pd.DataFrame,
     lags: list[int] | None = None,
     horizons: list[int] | None = None,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Train full-sample models for each horizon and compute exact SHAP values.
+
+    Note: Tree SHAP is fitted on the full historical dataset to provide a global
+    retrospective interpretability assessment across all regimes, whereas forecast
+    evaluations in `run_rolling_cv()` are strictly out-of-sample.
 
     Returns
     -------
@@ -608,6 +646,11 @@ def compute_tree_shap_interpretability(
             max_depth=max_depth,
             learning_rate=learning_rate,
             n_estimators=n_estimators,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            min_child_weight=min_child_weight,
+            reg_lambda=reg_lambda,
+            reg_alpha=reg_alpha,
         )
         model.fit(X, y)
 
@@ -669,6 +712,13 @@ def run_pipeline(
         shap_values_df.to_csv(
             out_dir / "r3_xgboost_shap_values.csv", index=False
         )
+        input_files = [
+            PROCESSED_DIR / "gold_features.csv",
+            PROCESSED_DIR / "bank_of_canada_data.csv",
+            PROCESSED_DIR / "fred_rates.csv",
+            PROCESSED_DIR / "statcan_cpi.csv",
+        ]
+        write_data_manifest(input_files, out_dir / "data_manifest.json")
         logger.info("Saved all XGBoost artifacts to %s", out_dir)
 
     return {
