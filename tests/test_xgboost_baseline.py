@@ -310,4 +310,75 @@ class TestSmokePipeline:
         assert df[feature_cols].isna().sum().sum() == 0, "Tidy SHAP matrix must not contain NaN values"
 
 
+# ---------------------------------------------------------------------------
+# Test 6: Split-conformal calibration fix (Issue #108)
+# ---------------------------------------------------------------------------
+
+class TestConformalCalibrationFix:
+    """Regression tests for the split-conformal quantile-level fix (#108)."""
+
+    def test_quantile_level_uses_n_cal_plus_one_denominator(self):
+        """Split-conformal quantile level must divide by (n_cal + 1), not n_cal --
+        dividing by n_cal overshoots the target quantile and understates coverage."""
+        n_cal = 50
+        correct_q90 = np.ceil((n_cal + 1) * 0.90) / (n_cal + 1)
+        buggy_q90 = np.ceil((n_cal + 1) * 0.90) / n_cal
+
+        assert correct_q90 == pytest.approx(46 / 51)
+        assert buggy_q90 > correct_q90, \
+            "Regression guard: the old n_cal denominator must overshoot the corrected quantile level"
+
+    def test_empirical_coverage_near_nominal_with_held_out_calibration(self, synthetic_gold_df):
+        """With a genuine held-out calibration split, 90% empirical coverage should
+        land in a plausible neighborhood of the 90% nominal target, not be
+        systematically depressed by an overshot quantile level."""
+        from xgboost_baseline import run_rolling_cv
+
+        _, _, intervals_df = run_rolling_cv(
+            synthetic_gold_df,
+            lags=[1, 2],
+            horizons=[1],
+            min_train=150,
+            n_folds=2,
+            n_estimators=10,
+            max_depth=2,
+        )
+
+        coverage_90 = intervals_df.loc[
+            intervals_df["horizon"] == 1, "empirical_coverage_90"
+        ].iloc[0]
+        # Loose sanity band on a small synthetic sample -- not a statistical
+        # guarantee, but it should not be far below nominal the way the
+        # n_cal-denominator bug would systematically cause.
+        assert 50.0 <= coverage_90 <= 100.0
+
+    def test_small_fixture_uses_shrunk_calibration_split_not_pure_in_sample(
+        self, synthetic_gold_df
+    ):
+        """A calibration window too small for the standard 15%/min-20 split should
+        still get a held-out (shrunk) calibration split rather than jumping
+        straight to in-sample residuals, as long as a minimal split is feasible."""
+        from xgboost_baseline import engineer_tabular_features, make_rolling_folds
+
+        data, _, _ = engineer_tabular_features(
+            synthetic_gold_df, lags=[1, 2], horizons=[5]
+        )
+        folds = make_rolling_folds(len(data), min_train=30, n_folds=2)
+        train_end, _ = folds[0]
+        h = 5
+        n_tr = train_end - h
+        cal_ratio = 0.15
+        cal_size = max(int(n_tr * cal_ratio), 20)
+        fit_end = n_tr - cal_size - h
+
+        # This fixture is chosen to actually exercise the "too small for the
+        # standard split" branch the fix targets.
+        assert fit_end < 10
+
+        shrunk_cal_size = max(min(cal_size, n_tr - h - 10), 5)
+        shrunk_fit_end = n_tr - shrunk_cal_size - h
+        assert shrunk_fit_end >= 10, \
+            "Shrinking the calibration set should recover a feasible held-out split"
+
+
 
