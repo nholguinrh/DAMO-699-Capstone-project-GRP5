@@ -28,3 +28,7 @@ data/processed/*
 
 # Dashboard pipeline-trigger run summary (per-run, machine-local)
 outputs/pipeline_run_status.json
+
+# Local PR code review and validation documents (not tracked deliverables)
+docs/PR_*_CODE_REVIEW*.md
+docs/PR_*_VALIDATION*.md
