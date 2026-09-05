@@ -21,6 +21,7 @@ def create_forecast_vs_actual_chart(
     horizon: int,
     selected_models: list[str],
     uncertainty_interval: str = "None",
+    window_label: str | None = None,
 ) -> go.Figure:
 
     plot_df = (
@@ -87,7 +88,14 @@ def create_forecast_vs_actual_chart(
         )
 
     fig.update_layout(
-        title=f"Forecasts vs Actuals — {horizon}-Day Horizon",
+        title=(
+            f"Forecasts vs Actuals — {horizon}-Day Horizon"
+            + (
+                f"<br><sub>Forecast origins {window_label}</sub>"
+                if window_label
+                else ""
+            )
+        ),
         xaxis_title="Forecast Origin Date",
         yaxis_title="10Y–2Y Yield Spread",
         hovermode="x unified",
@@ -224,6 +232,8 @@ def create_forecast_error_distribution(
     forecast_df: pd.DataFrame,
     horizon: int,
     chart_type: str,
+    selected_models: list[str] | None = None,
+    window_label: str | None = None,
 ) -> go.Figure:
 
     plot_df = forecast_df[
@@ -232,7 +242,17 @@ def create_forecast_error_distribution(
 
     fig = go.Figure()
 
-    for model_name, column in MODEL_COLUMNS.items():
+    models_to_plot = (
+        MODEL_COLUMNS.items()
+        if selected_models is None
+        else [
+            (name, col)
+            for name, col in MODEL_COLUMNS.items()
+            if name in selected_models
+        ]
+    )
+
+    for model_name, column in models_to_plot:
         if column not in plot_df.columns:
             continue
 
@@ -241,11 +261,13 @@ def create_forecast_error_distribution(
         if len(errors) == 0:
             continue
 
+        trace_name = f"{model_name} (n={len(errors)})"
+
         if chart_type == "Violin":
             fig.add_trace(
                 go.Violin(
                     y=errors,
-                    name=model_name,
+                    name=trace_name,
                     box_visible=True,
                     meanline_visible=True,
                     points=False,
@@ -256,7 +278,7 @@ def create_forecast_error_distribution(
             fig.add_trace(
                 go.Box(
                     y=errors,
-                    name=model_name,
+                    name=trace_name,
                     boxmean=True,
                     boxpoints="outliers",
                 )
@@ -272,6 +294,11 @@ def create_forecast_error_distribution(
         title=(
             f"Forecast Error Distribution — "
             f"{horizon}-Day Horizon"
+            + (
+                f"<br><sub>Forecast origins {window_label}</sub>"
+                if window_label
+                else ""
+            )
         ),
         xaxis_title="Model",
         yaxis_title=(
