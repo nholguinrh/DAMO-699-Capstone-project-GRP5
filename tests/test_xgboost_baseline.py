@@ -310,4 +310,70 @@ class TestSmokePipeline:
         assert df[feature_cols].isna().sum().sum() == 0, "Tidy SHAP matrix must not contain NaN values"
 
 
+# ---------------------------------------------------------------------------
+# Test 6: Split-conformal calibration fix (Issue #108)
+# ---------------------------------------------------------------------------
+
+class TestConformalCalibrationFix:
+    """Regression tests for the split-conformal quantile fix (#108).
+
+    Round 1 of this fix (dividing by n_cal + 1 instead of n_cal, then
+    feeding that level to np.quantile's default linear interpolation) was
+    itself wrong: np.quantile's virtual index is p * (n - 1), not
+    p * (n + 1), so the "corrected" level lands ~0.8-0.9 order statistics
+    below the true k-th one -- narrower intervals, coverage BELOW nominal,
+    i.e. worse than the original bug. These tests bind the actual
+    order-statistic estimator (_conformal_quantile), not a level fed to a
+    generic quantile function, so they can't pass on either broken form."""
+
+    def test_conformal_quantile_is_the_exact_order_statistic(self):
+        """The k-th smallest calibration residual must be returned exactly.
+        Both the n_cal denominator (#108 original) and the (n_cal + 1)
+        level fed to np.quantile's linear interpolation (#108 round 1) miss
+        this -- this test fails against both."""
+        from xgboost_baseline import _conformal_quantile
+
+        rng = np.random.RandomState(0)
+        for n_cal in (20, 37, 50, 101, 300):
+            r = np.sort(np.abs(rng.randn(n_cal)))
+            for q in (0.90, 0.95):
+                k = int(np.ceil((n_cal + 1) * q))
+                assert _conformal_quantile(r, q) == pytest.approx(r[k - 1]), \
+                    f"n_cal={n_cal} q={q}: must be the {k}-th smallest residual"
+                # Explicit regression guard against the round-1 (n_cal + 1)
+                # level under linear interpolation.
+                assert not np.isclose(
+                    _conformal_quantile(r, q),
+                    np.quantile(r, min(1.0, k / (n_cal + 1))),
+                ), "regressed to the (n_cal + 1) level under linear interpolation"
+
+    def test_raises_when_calibration_set_too_small_for_the_quantile(self):
+        """k > n_cal means the finite-sample conformal quantile is +inf --
+        no distribution-free guarantee exists, so this must raise rather
+        than silently return the sample max."""
+        from xgboost_baseline import _conformal_quantile
+
+        with pytest.raises(ValueError, match="cannot support"):
+            _conformal_quantile(np.abs(np.random.RandomState(0).randn(5)), 0.95)
+
+    def test_empirical_coverage_is_at_or_above_nominal_under_exchangeability(self):
+        """Distribution-free guarantee: with exchangeable calibration and
+        test scores, split-conformal coverage is >= nominal. This is the
+        assertion that would have caught the original #108 bug (coverage
+        below nominal) and would equally catch an over-corrected fix
+        (coverage still below nominal, just less so)."""
+        from xgboost_baseline import _conformal_quantile
+
+        rng = np.random.RandomState(1)
+        for n_cal, q in ((20, 0.90), (20, 0.95), (74, 0.90), (300, 0.95)):
+            hits = 0
+            trials = 4000
+            for _ in range(trials):
+                cal = np.abs(rng.randn(n_cal))
+                hits += abs(rng.randn()) <= _conformal_quantile(cal, q)
+            cov = hits / trials
+            assert cov >= q - 0.015, \
+                f"n_cal={n_cal} q={q}: empirical {cov:.3f} below nominal"
+
+
 
