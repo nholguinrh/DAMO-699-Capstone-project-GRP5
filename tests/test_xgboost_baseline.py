@@ -319,14 +319,30 @@ class TestConformalCalibrationFix:
 
     def test_quantile_level_uses_n_cal_plus_one_denominator(self):
         """Split-conformal quantile level must divide by (n_cal + 1), not n_cal --
-        dividing by n_cal overshoots the target quantile and understates coverage."""
+        dividing by n_cal overshoots the target quantile and understates coverage.
+        Calls the actual production helper rather than re-deriving the formula,
+        so this fails if the shipped code ever regresses."""
+        from xgboost_baseline import _conformal_quantile_level
+
         n_cal = 50
-        correct_q90 = np.ceil((n_cal + 1) * 0.90) / (n_cal + 1)
+        correct_q90 = _conformal_quantile_level(n_cal, 0.90)
         buggy_q90 = np.ceil((n_cal + 1) * 0.90) / n_cal
 
         assert correct_q90 == pytest.approx(46 / 51)
         assert buggy_q90 > correct_q90, \
             "Regression guard: the old n_cal denominator must overshoot the corrected quantile level"
+
+    def test_quantile_level_saturates_only_below_the_cal_size_floor(self):
+        """Documents why cal_size's 20-row floor in run_rolling_cv is exactly
+        the safety margin needed: below 19 calibration rows, the 95% level
+        saturates to the calibration set's max residual (ceil((n+1)*0.95) ==
+        n+1), which would silently produce a degenerate "95% interval"
+        identical to the 90% one after the non-crossing clamp."""
+        from xgboost_baseline import _conformal_quantile_level
+
+        assert _conformal_quantile_level(18, 0.95) == 1.0
+        assert _conformal_quantile_level(19, 0.95) < 1.0
+        assert _conformal_quantile_level(20, 0.95) < 1.0
 
     def test_empirical_coverage_near_nominal_with_held_out_calibration(self, synthetic_gold_df):
         """With a genuine held-out calibration split, 90% empirical coverage should
@@ -352,33 +368,55 @@ class TestConformalCalibrationFix:
         # n_cal-denominator bug would systematically cause.
         assert 50.0 <= coverage_90 <= 100.0
 
-    def test_small_fixture_uses_shrunk_calibration_split_not_pure_in_sample(
+    def test_lowered_fit_threshold_rescues_moderate_small_blocks_from_in_sample_fallback(
         self, synthetic_gold_df
     ):
-        """A calibration window too small for the standard 15%/min-20 split should
-        still get a held-out (shrunk) calibration split rather than jumping
-        straight to in-sample residuals, as long as a minimal split is feasible."""
+        """A training block too small for the OLD 30-row fit-size threshold,
+        but large enough for the lowered MIN_FIT_ROWS=10, should still reach
+        the real held-out calibration branch with cal_size at its safe
+        20-row floor -- not a shrunk, potentially-degenerate one, and not
+        the in-sample fallback either."""
         from xgboost_baseline import engineer_tabular_features, make_rolling_folds
 
         data, _, _ = engineer_tabular_features(
-            synthetic_gold_df, lags=[1, 2], horizons=[5]
+            synthetic_gold_df, lags=[1, 2], horizons=[1]
         )
-        folds = make_rolling_folds(len(data), min_train=30, n_folds=2)
+        folds = make_rolling_folds(len(data), min_train=36, n_folds=2)
         train_end, _ = folds[0]
-        h = 5
+        h = 1
         n_tr = train_end - h
-        cal_ratio = 0.15
-        cal_size = max(int(n_tr * cal_ratio), 20)
+        cal_size = max(int(n_tr * 0.15), 20)
         fit_end = n_tr - cal_size - h
 
-        # This fixture is chosen to actually exercise the "too small for the
-        # standard split" branch the fix targets.
-        assert fit_end < 10
+        # Between the new MIN_FIT_ROWS=10 and the old 30-row threshold --
+        # exactly the range this fix rescues -- while cal_size sits at its
+        # unshrunk, quantile-safe 20-row floor.
+        assert 10 <= fit_end < 30
+        assert cal_size == 20
 
-        shrunk_cal_size = max(min(cal_size, n_tr - h - 10), 5)
-        shrunk_fit_end = n_tr - shrunk_cal_size - h
-        assert shrunk_fit_end >= 10, \
-            "Shrinking the calibration set should recover a feasible held-out split"
+    def test_real_calibration_branch_never_uses_a_saturating_cal_size(
+        self, synthetic_gold_df
+    ):
+        """End-to-end guard: across every fold/horizon actually exercised by
+        run_rolling_cv on a small fixture, the 90%/95% intervals must not be
+        degenerate (95% collapsing to the same width as 90%), which is what
+        the reviewer-caught shrink-to-5 bug would have produced."""
+        from xgboost_baseline import run_rolling_cv
+
+        forecasts_df, _, _ = run_rolling_cv(
+            synthetic_gold_df,
+            lags=[1, 2],
+            horizons=[1, 5],
+            min_train=36,
+            n_folds=3,
+            n_estimators=10,
+            max_depth=2,
+        )
+
+        width_90 = forecasts_df["upper_90"] - forecasts_df["lower_90"]
+        width_95 = forecasts_df["upper_95"] - forecasts_df["lower_95"]
+        assert (width_95 > width_90).all(), \
+            "95% interval collapsed to the same width as 90% -- degenerate quantile"
 
 
 

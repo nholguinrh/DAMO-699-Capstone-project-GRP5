@@ -228,6 +228,22 @@ def make_rolling_folds(
 
 
 # ---------------------------------------------------------------------------
+# 3b. Split-conformal quantile level
+# ---------------------------------------------------------------------------
+
+def _conformal_quantile_level(n_cal: int, q: float) -> float:
+    """
+    Split-conformal quantile level for a calibration set of size ``n_cal``
+    targeting nominal coverage ``q`` (Vovk et al. 2005): the
+    ceil((n_cal + 1) * q)-th smallest calibration residual is used, i.e. a
+    quantile level of ceil((n_cal + 1) * q) / (n_cal + 1). Dividing by
+    ``n_cal`` instead systematically overshoots the target quantile and
+    understates the nominal coverage guarantee.
+    """
+    return min(1.0, np.ceil((n_cal + 1) * q) / (n_cal + 1))
+
+
+# ---------------------------------------------------------------------------
 # 4. Model factory
 # ---------------------------------------------------------------------------
 
@@ -386,19 +402,15 @@ def run_rolling_cv(
             cal_size = max(int(n_tr * cal_ratio), 20)
             fit_end = n_tr - cal_size - h
 
-            # Split-conformal theory calibrates the (n_cal + 1)-th smallest
-            # residual, i.e. a quantile level of ceil((n_cal + 1) * q) / (n_cal + 1)
-            # -- dividing by n_cal instead systematically overshoots the target
-            # quantile and understates the nominal coverage guarantee.
+            # A calibration set below ~19 rows lets the 95% split-conformal
+            # quantile level saturate to the calibration set's max residual
+            # (ceil((n_cal + 1) * 0.95) == n_cal + 1 once n_cal < 19), which
+            # would silently produce a degenerate "95% interval" identical to
+            # the 90% one -- so cal_size (already floored at 20 above) is
+            # never reduced to free up more fit rows. The only lever for very
+            # small training blocks is how few fit rows are required before
+            # falling back to in-sample residuals instead.
             MIN_FIT_ROWS = 10
-            if fit_end < MIN_FIT_ROWS:
-                # Standard 15%-of-train / min-20 calibration set leaves too few
-                # fit rows. Shrink the calibration set first so residuals still
-                # come from a held-out split the point model never trained on,
-                # rather than jumping straight to in-sample residuals, which
-                # are optimistic and understate true out-of-sample error.
-                cal_size = max(min(cal_size, n_tr - h - MIN_FIT_ROWS), 5)
-                fit_end = n_tr - cal_size - h
 
             if fit_end >= MIN_FIT_ROWS:
                 fit_data = train_data.iloc[:fit_end]
@@ -419,10 +431,12 @@ def run_rolling_cv(
                 cal_residuals = np.abs(cal_data[t_col].values - cal_preds)
 
                 n_cal = len(cal_residuals)
-                q90_level = min(1.0, np.ceil((n_cal + 1) * 0.90) / (n_cal + 1))
-                q95_level = min(1.0, np.ceil((n_cal + 1) * 0.95) / (n_cal + 1))
-                res_90 = float(np.quantile(cal_residuals, q90_level))
-                res_95 = float(np.quantile(cal_residuals, q95_level))
+                res_90 = float(
+                    np.quantile(cal_residuals, _conformal_quantile_level(n_cal, 0.90))
+                )
+                res_95 = float(
+                    np.quantile(cal_residuals, _conformal_quantile_level(n_cal, 0.95))
+                )
             else:
                 # Fallback for fixtures too tiny for any held-out calibration
                 # split at all (e.g. minimal unit-test fixtures).
