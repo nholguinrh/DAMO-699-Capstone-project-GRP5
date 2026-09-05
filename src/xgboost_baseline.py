@@ -677,9 +677,13 @@ def run_pipeline(
         shap_values_df.to_csv(
             out_dir / "r3_xgboost_shap_values.csv", index=False
         )
-        gold_csv = PROCESSED_DIR / "gold_features.csv"
-        if gold_csv.exists():
-            write_data_manifest([gold_csv], out_dir / "data_manifest.json")
+        input_files = [
+            PROCESSED_DIR / "gold_features.csv",
+            PROCESSED_DIR / "bank_of_canada_data.csv",
+            PROCESSED_DIR / "fred_rates.csv",
+            PROCESSED_DIR / "statcan_cpi.csv",
+        ]
+        write_data_manifest(input_files, out_dir / "data_manifest.json")
         logger.info("Saved all XGBoost artifacts to %s", out_dir)
 
     return {

@@ -376,20 +376,24 @@ def evaluate_config_across_seeds(
 
     out = dict(seed_records[0])
 
-    # Average every numeric metric across seeds (R2-2)
+    # Average every numeric metric across seeds (R2-2, R3-5)
     per_h_keys = [k for k in seed_records[0] if k.startswith(("val_rmse_h", "naive_rmse_h", "rel_rmse_h"))]
     for k in per_h_keys:
         if is_deterministic:
             out[k] = round(float(seed_records[0][k]), 6)
-            out[f"{k}_sd"] = 0.0
+            if not k.startswith("naive_rmse_h"):
+                out[f"{k}_sd"] = 0.0
         else:
             vals = [r[k] for r in seed_records]
             out[k] = round(float(np.mean(vals)), 6)
-            out[f"{k}_sd"] = round(float(np.std(vals, ddof=1)), 6) if len(vals) > 1 else 0.0
+            if not k.startswith("naive_rmse_h"):
+                out[f"{k}_sd"] = round(float(np.std(vals, ddof=1)), 6) if len(vals) > 1 else 0.0
 
-    # Pop individual fit seed and log selection_seeds
+    # Pop individual fit seed and log execution details truthfully (R3-2)
     out.pop("seed", None)
-    out["selection_seeds"] = ",".join(str(s) for s in seeds)
+    out["n_selection_seeds"] = len(eval_seeds)
+    out["selection_seeds"] = ",".join(str(s) for s in eval_seeds)
+    out["dispersion_basis"] = "deterministic" if is_deterministic else "multi_seed"
 
     if is_deterministic:
         out["mean_relative_rmse"] = round(float(seed_records[0]["mean_relative_rmse"]), 6)
@@ -405,8 +409,6 @@ def evaluate_config_across_seeds(
         out["mean_val_rmse"] = round(float(np.mean(mean_val_vals)), 6)
         out["std_val_rmse"] = round(float(np.std(mean_val_vals, ddof=1)), 6) if len(mean_val_vals) > 1 else 0.0
         out["val_improvement_pct"] = round(float((1.0 - out["mean_relative_rmse"]) * 100.0), 3)
-
-    out["n_selection_seeds"] = len(seeds)
 
     return out, partitions
 
@@ -471,17 +473,24 @@ def run_grid_search(
 
     results_df = pd.DataFrame(records)
 
-    # Rank on seed-mean, then collapse configurations within 1 sd of leader into indifference band (R2-6)
+    # Rank on seed-mean, then collapse configurations within 1 sd of leader into indifference band (R2-6, R3-1)
     results_df = results_df.sort_values("mean_relative_rmse").reset_index(drop=True)
     band = float(results_df["std_relative_rmse"].replace(0.0, np.nan).median())
     leader = float(results_df["mean_relative_rmse"].iloc[0])
     results_df["within_1sd_of_leader"] = (
         results_df["mean_relative_rmse"] <= leader + (band if np.isfinite(band) else 0.0)
     )
-    results_df = results_df.sort_values(
-        ["within_1sd_of_leader", "n_estimators", "max_depth", "mean_relative_rmse"],
-        ascending=[False, True, True, True],
-    ).reset_index(drop=True)
+    # Parsimony is a tie-break WITHIN the indifference band only. Outside it,
+    # the objective is the ordering strictly (R3-1).
+    in_band = (
+        results_df[results_df["within_1sd_of_leader"]]
+        .sort_values(["n_estimators", "max_depth", "mean_relative_rmse"])
+    )
+    out_band = (
+        results_df[~results_df["within_1sd_of_leader"]]
+        .sort_values("mean_relative_rmse")
+    )
+    results_df = pd.concat([in_band, out_band], ignore_index=True)
     results_df["rank"] = range(1, len(results_df) + 1)
 
     # Flag canonical baseline configuration

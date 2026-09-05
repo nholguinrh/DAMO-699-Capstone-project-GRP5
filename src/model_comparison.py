@@ -1067,10 +1067,14 @@ def export_all_model_comparisons(output_dir: Path | None = None) -> None:
     regime_df = evaluate_regime_segmentation(output_path=out / "r3_regime_segmented_metrics.csv")
     logger.info("Saved Regime Segmentation metrics (%d rows) to %s", len(regime_df), out)
 
-    gold_csv = PROCESSED_DIR / "gold_features.csv"
-    if gold_csv.exists():
-        write_data_manifest([gold_csv], out / "data_manifest.json")
-        logger.info("Saved input data manifest to %s", out / "data_manifest.json")
+    input_files = [
+        PROCESSED_DIR / "gold_features.csv",
+        PROCESSED_DIR / "bank_of_canada_data.csv",
+        PROCESSED_DIR / "fred_rates.csv",
+        PROCESSED_DIR / "statcan_cpi.csv",
+    ]
+    write_data_manifest(input_files, out / "data_manifest.json")
+    logger.info("Saved input data manifest to %s", out / "data_manifest.json")
 
 
 if __name__ == "__main__":

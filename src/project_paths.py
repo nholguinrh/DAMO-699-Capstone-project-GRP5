@@ -88,7 +88,9 @@ def write_data_manifest(paths: list[Path], out: Path) -> dict[str, Any]:
                         entry["start_date"] = str(dates.min().date())
                         entry["end_date"] = str(dates.max().date())
             except Exception:
-                pass
+                import logging
+                logging.getLogger(__name__).warning("Could not read %s for manifest row/date bounds", p, exc_info=True)
+                entry["row_count"] = None
         manifest[p.name] = entry
 
     out.parent.mkdir(parents=True, exist_ok=True)

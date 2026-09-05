@@ -6,5 +6,27 @@
     "row_count": 4268,
     "start_date": "2010-02-19",
     "end_date": "2026-06-30"
+  },
+  "bank_of_canada_data.csv": {
+    "path": "data/processed/bank_of_canada_data.csv",
+    "sha256": "bf4016bffe9ba6869d23d2451a2b4c6aba52567db2b8c3ccc8670ce3f85fb1f7",
+    "size_bytes": 332092,
+    "row_count": 4552,
+    "start_date": "2009-01-02",
+    "end_date": "2026-06-30"
+  },
+  "fred_rates.csv": {
+    "path": "data/processed/fred_rates.csv",
+    "sha256": "7217ad5643b909413e5b2fde44090818ba76e7ba77dbcf477209becb85241847",
+    "size_bytes": 98777,
+    "row_count": 4563,
+    "start_date": "2009-01-02",
+    "end_date": "2026-06-30"
+  },
+  "statcan_cpi.csv": {
+    "path": "data/processed/statcan_cpi.csv",
+    "sha256": "de3806e715be80e6a1938b0301cdb31e1eccc700fdde08beb1e6cfca5f7d48b7",
+    "size_bytes": 6114,
+    "row_count": 210
   }
 }

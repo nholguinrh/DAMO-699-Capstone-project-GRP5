@@ -34,6 +34,7 @@ def create_forecast_vs_actual_chart(
     fig = go.Figure()
 
     # Optional XGBoost Prediction Interval Ribbon
+    # ("XGBoost" literal check is intentionally retained for stale Streamlit session state)
     if (
         uncertainty_interval in ["90%", "95%"]
         and any(m in selected_models for m in [XGB_DISPLAY_LABEL, "XGBoost"])
@@ -74,6 +75,7 @@ def create_forecast_vs_actual_chart(
     )
 
     for model_name in selected_models:
+        # Fallback to "xgboost" if model_name is the legacy "XGBoost" string from prior session state
         column = MODEL_COLUMNS.get(model_name) or ("xgboost" if model_name == "XGBoost" else None)
 
         if column is None or column not in plot_df.columns:

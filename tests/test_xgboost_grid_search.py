@@ -226,3 +226,19 @@ class TestGridSearchExecution:
         d = pd.read_csv(csv_path)
         per_h = d[[f"rel_rmse_h{h}" for h in (1, 5, 20)]].mean(axis=1)
         assert np.allclose(per_h, d["mean_relative_rmse"], atol=1e-4)
+
+    def test_rank_is_monotonic_in_objective_outside_the_indifference_band(self):
+        """Parsimony re-ordering applies only inside the 1-sd band. Every configuration
+        outside it must be ranked by the selection objective, or `rank` stops meaning
+        what §4.3 and the CSV header claim it means."""
+        csv_path = OUTPUTS_DIR / "r3_xgboost_hyperparameter_search.csv"
+        if not csv_path.exists():
+            pytest.skip("r3_xgboost_hyperparameter_search.csv not present yet.")
+        d = pd.read_csv(csv_path)
+        outside = d[~d["within_1sd_of_leader"]].sort_values("rank")
+        assert outside["mean_relative_rmse"].is_monotonic_increasing
+        # The band leader must still be the global objective minimum.
+        assert np.isclose(
+            d["mean_relative_rmse"].min(),
+            d.loc[d["within_1sd_of_leader"], "mean_relative_rmse"].min(),
+        )

@@ -434,6 +434,25 @@ def test_run_clark_west_battery_smoke(clark_west_battery_results):
     assert primary_df["r2_oos_adj"].notna().all()
 
 
+OUT_DIR = project_root / "outputs"
+EXPECTED_GOLD_SHA256 = "91979adb6c3b71a06bde7f58db6ddadc83b4c2e3ebe8783363e6e8709ce84e82"
+
+
+def test_common_sample_size_is_attributable_to_the_recorded_vintage():
+    """`n_forecasts == 745` is only meaningful if we know which inputs produced it.
+    If this fails on the sha but not the count (or vice versa), the vintage moved and
+    the committed outputs must be regenerated in the same commit."""
+    import json
+    manifest_path = OUT_DIR / "data_manifest.json"
+    if not manifest_path.exists():
+        pytest.skip("data_manifest.json not present yet.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "gold_features.csv" in manifest
+    assert manifest["gold_features.csv"]["sha256"] == EXPECTED_GOLD_SHA256
+    cw = pd.read_csv(OUT_DIR / "clark_west_test_results.csv")
+    assert (cw["n_forecasts"] == 745).all()
+
+
 def test_clark_west_primary_battery_fifteen_hypotheses(clark_west_battery_results):
     """Verify unified primary battery contains 5 models x 3 horizons = 15 tests, including XGBoost."""
     primary_df, sensitivity_df = clark_west_battery_results
