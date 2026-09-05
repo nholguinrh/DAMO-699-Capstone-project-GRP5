@@ -29,6 +29,17 @@ RELEASE_DATE_FILE = (
     / "cpi_release_dates.csv"
 )
 
+# Issue #109: the StatCan endpoint used below (getDataFromVectorByReferencePeriodRange)
+# ignores endReferencePeriod and always returns a fixed ~210-observation rolling
+# window anchored to the latest published month, regardless of what start/end
+# dates are requested. As new months publish, the window slides forward and the
+# oldest reference months silently fall out of every fresh pull. ARCHIVE_FILE is
+# a git-tracked, append-only union of every reference_month ever observed across
+# all pulls (seeded from the raw JSON that built the canonical dataset), so the
+# ingestion window is no longer limited by what any single pull happens to cover.
+ARCHIVE_FILE = CONFIG_DIR / "statcan_cpi_archive.csv"
+ARCHIVE_COLUMNS = ["reference_month", "cpi_all_items"]
+
 # Reference months StatCan's own historical archive currently cannot
 # answer (both source catalog pages 500-error / timeout as of Aug 2026):
 #   https://www150.statcan.gc.ca/n1/en/catalogue/62-001-X2010004
@@ -355,6 +366,90 @@ def create_cpi_dataframe(
     )
 
     return cpi_df
+
+
+# ---------------------------------------------------------
+# 8b. Append-only CPI observation archive (Issue #109)
+# ---------------------------------------------------------
+
+def load_archive() -> pd.DataFrame:
+    """
+    Load the persisted, append-only CPI observation archive.
+
+    Returns an empty frame with the correct columns/dtypes if the archive
+    hasn't been created yet (e.g. before the first run on a fresh clone
+    that predates this fix, or after ``ARCHIVE_FILE`` is deleted).
+    """
+    if not ARCHIVE_FILE.exists():
+        return pd.DataFrame(
+            {
+                "reference_month": pd.Series(dtype="datetime64[ns]"),
+                "cpi_all_items": pd.Series(dtype="float64"),
+            }
+        )
+
+    archive_df = pd.read_csv(ARCHIVE_FILE)
+    archive_df["reference_month"] = pd.to_datetime(archive_df["reference_month"])
+    archive_df["cpi_all_items"] = pd.to_numeric(archive_df["cpi_all_items"])
+    return archive_df[ARCHIVE_COLUMNS]
+
+
+def merge_into_archive(
+    archive_df: pd.DataFrame,
+    new_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Union a freshly-pulled CPI dataframe into the persisted archive.
+
+    Every pull only covers a rolling ~210-month window (Issue #109), so any
+    single pull can be missing reference months an earlier pull already saw.
+    Concatenating onto the archive and keeping the newest observation per
+    ``reference_month`` (``new_df``'s, since it's appended last) preserves
+    history the current pull doesn't cover while still picking up any
+    revision StatCan makes to a recently-published value.
+    """
+    combined = pd.concat(
+        [archive_df[ARCHIVE_COLUMNS], new_df[ARCHIVE_COLUMNS]],
+        ignore_index=True,
+    )
+    return (
+        combined
+        .drop_duplicates(subset=["reference_month"], keep="last")
+        .sort_values("reference_month")
+        .reset_index(drop=True)
+    )
+
+
+def save_archive(archive_df: pd.DataFrame) -> Path:
+    """Persist the archive to ``ARCHIVE_FILE`` (git-tracked, unlike ``data/``)."""
+    archive_df[ARCHIVE_COLUMNS].to_csv(ARCHIVE_FILE, index=False)
+    return ARCHIVE_FILE
+
+
+def rebuild_archive_from_raw_cache() -> pd.DataFrame:
+    """
+    Rebuild the archive from every cached raw JSON pull in ``STATCAN_RAW_DIR``,
+    oldest pull first so the newest pull's value wins any reference-month
+    overlap. Used to seed/recover the archive from raw pulls that predate
+    this fix rather than from a single day's ~210-month window.
+    """
+    cached_files = sorted(
+        STATCAN_RAW_DIR.glob(f"cpi_{VECTOR_ID}_*.json"),
+        key=lambda file_path: file_path.stat().st_mtime,
+    )
+
+    if not cached_files:
+        raise FileNotFoundError(
+            f"No cached Statistics Canada CPI JSON found in {STATCAN_RAW_DIR}"
+        )
+
+    archive_df = load_archive()
+    for raw_file in cached_files:
+        pull_df = create_cpi_dataframe(load_raw_json(raw_file))
+        archive_df = merge_into_archive(archive_df, pull_df)
+
+    save_archive(archive_df)
+    return archive_df
 
 
 # ---------------------------------------------------------
@@ -794,10 +889,12 @@ def run(
     start_date, end_date:
         Optional ISO (YYYY-MM-DD) overrides for the reference-period window.
         Default to ``config.CPI_REFERENCE_START`` / ``config.DATE_END``. CPI
-        reference months are clamped to this range; ``use_cache=True`` cannot
-        extend past what is cached. Extending ``end_date`` past the coverage of
-        ``config/cpi_release_dates.csv`` requires refreshing that file first
-        (see ``build_cpi_release_dates.py``).
+        reference months are clamped to this range from ``ARCHIVE_FILE`` (see
+        Issue #109) -- the requested window can extend past whatever a single
+        pull's ~210-month rolling window happens to cover, as long as the
+        archive has accumulated that history from an earlier pull. Extending
+        ``end_date`` past the coverage of ``config/cpi_release_dates.csv``
+        requires refreshing that file first (see ``build_cpi_release_dates.py``).
 
     Returns
     -------
@@ -832,9 +929,15 @@ def run(
 
     data = load_raw_json(raw_file)
 
-    cpi_df = create_cpi_dataframe(data)
+    pull_df = create_cpi_dataframe(data)
 
-    cpi_df = clamp_to_range(cpi_df, "reference_month", start, end)
+    # Issue #109: this pull only covers StatCan's fixed ~210-month rolling
+    # window, so merge it into the persisted archive rather than trusting it
+    # alone -- that preserves reference months this pull doesn't cover.
+    archive_df = merge_into_archive(load_archive(), pull_df)
+    save_archive(archive_df)
+
+    cpi_df = clamp_to_range(archive_df, "reference_month", start, end)
 
     release_df = load_release_date_mapping()
 
@@ -914,6 +1017,17 @@ def parse_arguments() -> argparse.Namespace:
         help="ISO (YYYY-MM-DD) end of the reference-period window. Defaults to config.DATE_END.",
     )
 
+    parser.add_argument(
+        "--rebuild-archive-from-raw-cache",
+        action="store_true",
+        help=(
+            "Rebuild config/statcan_cpi_archive.csv (Issue #109) from every "
+            "cached raw JSON pull in data/raw/statcan/, oldest first, instead "
+            "of running the ingestion pipeline. Use this to seed or recover "
+            "the archive from raw pulls that predate this fix."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -925,18 +1039,27 @@ if __name__ == "__main__":
 
     arguments = parse_arguments()
 
-    if (
-        arguments.cache_file is not None
-        and not arguments.from_cache
-    ):
-        raise ValueError(
-            "--cache-file must be used together with "
-            "--from-cache."
+    if arguments.rebuild_archive_from_raw_cache:
+        rebuilt = rebuild_archive_from_raw_cache()
+        print(
+            f"\nRebuilt {ARCHIVE_FILE} from cached raw JSON: "
+            f"{len(rebuilt)} reference months, "
+            f"{rebuilt['reference_month'].min().date()} to "
+            f"{rebuilt['reference_month'].max().date()}."
         )
+    else:
+        if (
+            arguments.cache_file is not None
+            and not arguments.from_cache
+        ):
+            raise ValueError(
+                "--cache-file must be used together with "
+                "--from-cache."
+            )
 
-    run(
-        use_cache=arguments.from_cache,
-        cache_file=arguments.cache_file,
-        start_date=arguments.start_date,
-        end_date=arguments.end_date,
-    )
+        run(
+            use_cache=arguments.from_cache,
+            cache_file=arguments.cache_file,
+            start_date=arguments.start_date,
+            end_date=arguments.end_date,
+        )
