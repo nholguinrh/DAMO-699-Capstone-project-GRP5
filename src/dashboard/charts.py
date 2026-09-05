@@ -232,6 +232,7 @@ def create_forecast_error_distribution(
     forecast_df: pd.DataFrame,
     horizon: int,
     chart_type: str,
+    selected_models: list[str] | None = None,
     window_label: str | None = None,
 ) -> go.Figure:
 
@@ -241,7 +242,17 @@ def create_forecast_error_distribution(
 
     fig = go.Figure()
 
-    for model_name, column in MODEL_COLUMNS.items():
+    models_to_plot = (
+        MODEL_COLUMNS.items()
+        if selected_models is None
+        else [
+            (name, col)
+            for name, col in MODEL_COLUMNS.items()
+            if name in selected_models
+        ]
+    )
+
+    for model_name, column in models_to_plot:
         if column not in plot_df.columns:
             continue
 

@@ -14,7 +14,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"))
 
-from data_loader import filter_by_origin_window, window_model_coverage  # noqa: E402
+from data_loader import (  # noqa: E402
+    filter_by_origin_window,
+    min_covered_origins,
+    window_model_coverage,
+)
 
 
 @pytest.fixture
@@ -84,3 +88,37 @@ class TestWindowModelCoverage:
             df, {"Naïve Random Walk": "naive", "XGBoost": "xgboost"}
         )
         assert set(coverage["model"]) == {"Naïve Random Walk"}
+
+
+class TestMinCoveredOrigins:
+    def test_returns_the_minimum_not_the_maximum(self):
+        """Regression guard: taking the max here would let a well-covered
+        model wave through a box/violin built from another plotted model's
+        much smaller sample (e.g. 31 origins for most models but only 27
+        for XGBoost, whose common-sample start is later)."""
+        coverage = pd.DataFrame({
+            "model": ["Naïve Random Walk", "ARIMA", "XGBoost"],
+            "n_origins": [31, 31, 27],
+        })
+        assert min_covered_origins(coverage) == 27
+
+    def test_ignores_zero_coverage_models(self):
+        """A model with zero coverage is already disclosed/omitted
+        separately -- it must not drag the sample-size floor to 0 for the
+        models that ARE actually being plotted."""
+        coverage = pd.DataFrame({
+            "model": ["Naïve Random Walk", "XGBoost"],
+            "n_origins": [31, 0],
+        })
+        assert min_covered_origins(coverage) == 31
+
+    def test_all_zero_coverage_returns_zero(self):
+        coverage = pd.DataFrame({
+            "model": ["Naïve Random Walk"],
+            "n_origins": [0],
+        })
+        assert min_covered_origins(coverage) == 0
+
+    def test_empty_coverage_returns_zero(self):
+        coverage = pd.DataFrame(columns=["model", "n_origins"])
+        assert min_covered_origins(coverage) == 0

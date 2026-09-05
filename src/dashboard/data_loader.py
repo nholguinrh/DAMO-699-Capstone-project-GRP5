@@ -329,6 +329,21 @@ def window_model_coverage(
     )
 
 
+def min_covered_origins(coverage_df: pd.DataFrame) -> int:
+    """
+    Smallest non-zero per-model origin count in a ``window_model_coverage()``
+    result, or 0 if no model has any coverage.
+
+    Used to gate distribution charts (quartiles/whiskers/KDE) on sample
+    size: the weakest-covered model actually being plotted determines
+    whether those statistics are still meaningful, not the best-covered
+    one -- taking the max here would let one well-covered model wave
+    through a box built from another plotted model's much smaller sample.
+    """
+    present = coverage_df.loc[coverage_df["n_origins"] > 0, "n_origins"]
+    return int(present.min()) if not present.empty else 0
+
+
 # =========================================================
 # COMMON-SAMPLE METRICS
 # =========================================================

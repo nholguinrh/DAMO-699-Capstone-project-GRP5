@@ -39,6 +39,7 @@ from data_loader import (
     load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
+    min_covered_origins,
     window_model_coverage,
 )
 
@@ -727,6 +728,16 @@ with tab_performance:
         use_container_width=True,
     )
 
+    st.caption(
+        f"This comparison and the regime table below are computed once "
+        f"over the **full** common sample of "
+        f"{pipeline_metadata['common_origins_per_horizon']} forecast origins "
+        "per horizon, shared simultaneously across the core models and "
+        "available benchmarks -- they are **not** affected by the sidebar "
+        "date range. The date range only filters the Forecasts vs Actuals "
+        "chart below."
+    )
+
     st.divider()
 
     st.subheader("Forecasts vs Actuals")
@@ -757,7 +768,7 @@ with tab_performance:
             )
 
         forecast_fig = create_forecast_vs_actual_chart(
-            filtered_forecast_df,
+            horizon_window_df,
             horizon=horizon,
             selected_models=_plot_models,
             uncertainty_interval=(
@@ -776,15 +787,6 @@ with tab_performance:
             f"{horizon}-day horizon; realized outcomes plotted extend "
             f"{horizon} trading day(s) beyond {_range_end:%Y-%m-%d}."
         )
-
-    st.caption(
-        f"The RMSE / MAE comparison above and the regime table below are "
-        f"computed once over the **full** common sample of "
-        f"{pipeline_metadata['common_origins_per_horizon']} forecast origins "
-        "per horizon, shared simultaneously across the core models and "
-        "available benchmarks -- they are **not** affected by the sidebar "
-        "date range."
-    )
 
     if regime_metrics_df is not None:
         st.divider()
@@ -972,7 +974,14 @@ with tab_errors:
             "Widen the date range in the sidebar."
         )
     else:
-        _coverage = window_model_coverage(horizon_window_df, MODEL_COLUMNS)
+        # Scoped to "Models to display" so this tab's disclosures and gate
+        # match what's actually plotted below, consistent with Tab 3.
+        _selected_columns = {
+            name: col
+            for name, col in MODEL_COLUMNS.items()
+            if name in selected_models
+        }
+        _coverage = window_model_coverage(horizon_window_df, _selected_columns)
         _absent_models = _coverage.loc[
             _coverage["n_origins"] == 0, "model"
         ].tolist()
@@ -995,21 +1004,22 @@ with tab_errors:
                 "spread with caution."
             )
 
-        _max_n = int(_present["n_origins"].max()) if not _present.empty else 0
-        if _max_n < MIN_ORIGINS_FOR_DISTRIBUTION:
+        _min_n = min_covered_origins(_coverage)
+        if _min_n < MIN_ORIGINS_FOR_DISTRIBUTION:
             st.warning(
-                f"Only {_max_n} forecast origin(s) fall in this window at "
-                f"the {horizon}-day horizon (fewer than "
-                f"{MIN_ORIGINS_FOR_DISTRIBUTION}). Quartiles, whiskers, and "
-                "the violin density are not statistically meaningful at "
-                "this sample size, so the chart is not shown -- widen the "
-                "date range in the sidebar."
+                f"At least one selected model has only {_min_n} forecast "
+                f"origin(s) in this window at the {horizon}-day horizon "
+                f"(fewer than {MIN_ORIGINS_FOR_DISTRIBUTION}). Quartiles, "
+                "whiskers, and the violin density are not statistically "
+                "meaningful at this sample size, so the chart is not "
+                "shown -- widen the date range in the sidebar."
             )
         else:
             error_fig = create_forecast_error_distribution(
-                filtered_forecast_df,
+                horizon_window_df,
                 horizon=horizon,
                 chart_type=error_chart_type,
+                selected_models=selected_models,
                 window_label=_window_label,
             )
 
