@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +39,19 @@ RELEASE_DATE_FILE = (
 # all pulls (seeded from the raw JSON that built the canonical dataset), so the
 # ingestion window is no longer limited by what any single pull happens to cover.
 ARCHIVE_FILE = CONFIG_DIR / "statcan_cpi_archive.csv"
-ARCHIVE_COLUMNS = ["reference_month", "cpi_all_items"]
+# source_pull records the raw JSON filename each row's value came from, so
+# every archived observation is independently traceable to a committed
+# input (Issue #109 review, B5) rather than being an unattributed number.
+ARCHIVE_COLUMNS = ["reference_month", "cpi_all_items", "source_pull"]
+
+# Largest change in a single archived CPI value that a revision may make
+# without operator sign-off (index points). StatCan revisions to already-
+# published values are typically fractions of an index point; anything past
+# this is far more likely a CPI basket rebasing (which shifts the *entire*
+# index level and would splice two incompatible bases into one series with
+# no downstream way to detect it), a bad pull, or a corrupted archive --
+# never a routine revision. See merge_into_archive().
+MAX_ARCHIVE_REVISION = 1.0
 
 # Reference months StatCan's own historical archive currently cannot
 # answer (both source catalog pages 500-error / timeout as of Aug 2026):
@@ -390,29 +403,69 @@ def load_archive() -> pd.DataFrame:
             {
                 "reference_month": pd.Series(dtype="datetime64[ns]"),
                 "cpi_all_items": pd.Series(dtype="float64"),
+                "source_pull": pd.Series(dtype="object"),
             }
         )
 
     archive_df = pd.read_csv(ARCHIVE_FILE)
     archive_df["reference_month"] = pd.to_datetime(archive_df["reference_month"])
     archive_df["cpi_all_items"] = pd.to_numeric(archive_df["cpi_all_items"])
+    if "source_pull" not in archive_df.columns:
+        archive_df["source_pull"] = "unknown (pre-provenance archive)"
     return archive_df[ARCHIVE_COLUMNS]
 
 
 def merge_into_archive(
     archive_df: pd.DataFrame,
     new_df: pd.DataFrame,
+    max_revision: float = MAX_ARCHIVE_REVISION,
 ) -> pd.DataFrame:
     """
     Union a freshly-pulled CPI dataframe into the persisted archive.
 
     Every pull only covers a rolling ~210-month window (Issue #109), so any
     single pull can be missing reference months an earlier pull already saw.
-    Concatenating onto the archive and keeping the newest observation per
-    ``reference_month`` (``new_df``'s, since it's appended last) preserves
-    history the current pull doesn't cover while still picking up any
-    revision StatCan makes to a recently-published value.
+    Keeping the newest observation per ``reference_month`` (``new_df``'s,
+    since it's appended last) preserves history the current pull doesn't
+    cover while still picking up a genuine StatCan revision.
+
+    A revision is only accepted if it is small (Issue #109 review, B3). A
+    pull that moves an archived value by more than ``max_revision`` index
+    points is far more likely a CPI basket rebasing (which shifts the
+    *entire* index level), a bad pull, or a corrupted archive than a
+    routine revision -- and rewriting only the ~210 months the rolling
+    window covers would splice two incompatible index bases into one
+    series with no downstream way to detect it. Raises rather than
+    silently accepting it. Null values in ``new_df`` never overwrite a
+    good archived value.
     """
+    new_df = new_df[ARCHIVE_COLUMNS].dropna(subset=["cpi_all_items"])
+
+    overlap = archive_df.merge(
+        new_df, on="reference_month", how="inner", suffixes=("_old", "_new")
+    )
+    changed = overlap.loc[
+        (overlap["cpi_all_items_old"] - overlap["cpi_all_items_new"]).abs() > 1e-9
+    ]
+    if not changed.empty:
+        deltas = (changed["cpi_all_items_new"] - changed["cpi_all_items_old"]).abs()
+        for _, row in changed.iterrows():
+            print(
+                f"REVISION: {row['reference_month'].date()} "
+                f"{row['cpi_all_items_old']} -> {row['cpi_all_items_new']}"
+            )
+        if (deltas > max_revision).any():
+            worst = changed.loc[deltas.idxmax()]
+            raise ValueError(
+                f"{int((deltas > max_revision).sum())} archived CPI value(s) "
+                f"would change by more than {max_revision} index point(s) -- "
+                f"largest: {worst['reference_month'].date()} "
+                f"{worst['cpi_all_items_old']} -> {worst['cpi_all_items_new']}. "
+                "This looks like a rebasing or a bad pull, not a routine "
+                "revision. Reconcile manually before letting it rewrite "
+                "committed history."
+            )
+
     combined = pd.concat(
         [archive_df[ARCHIVE_COLUMNS], new_df[ARCHIVE_COLUMNS]],
         ignore_index=True,
@@ -425,26 +478,90 @@ def merge_into_archive(
     )
 
 
+def validate_archive(archive_df: pd.DataFrame) -> None:
+    """
+    Validate the FULL archive before it is persisted (Issue #109 review, B1).
+
+    ``run()`` clamps to the requested window before validating against the
+    release-date mapping and the other checks in ``validate_dataframe()`` --
+    so without this, a reference month outside that window would reach the
+    git-tracked archive with no checks at all. The archive is the upstream
+    source of truth for the whole Gold frame; every row in it must be
+    sound, not just the ones the current run's window happens to cover.
+    """
+    if archive_df.empty:
+        raise ValueError("Refusing to persist an empty CPI archive.")
+
+    if archive_df["reference_month"].isna().any():
+        raise ValueError("CPI archive contains invalid reference months.")
+
+    if archive_df["reference_month"].duplicated().any():
+        dupes = archive_df.loc[
+            archive_df["reference_month"].duplicated(keep=False), "reference_month"
+        ]
+        raise ValueError(
+            "CPI archive contains duplicate reference months: "
+            f"{dupes.dt.strftime('%Y-%m-%d').tolist()}"
+        )
+
+    missing = archive_df["cpi_all_items"].isna()
+    if missing.any():
+        raise ValueError(
+            "CPI archive contains null value(s) for reference month(s): "
+            f"{archive_df.loc[missing, 'reference_month'].dt.strftime('%Y-%m-%d').tolist()}"
+        )
+
+    if not archive_df["reference_month"].is_monotonic_increasing:
+        raise ValueError("CPI archive reference months are not sorted ascending.")
+
+    expected = pd.date_range(
+        archive_df["reference_month"].min(),
+        archive_df["reference_month"].max(),
+        freq="MS",
+    )
+    gaps = sorted(set(expected) - set(archive_df["reference_month"]))
+    if gaps:
+        raise ValueError(
+            "CPI archive has gaps in its monthly coverage: "
+            f"{[g.strftime('%Y-%m-%d') for g in gaps]}"
+        )
+
+
 def save_archive(archive_df: pd.DataFrame) -> Path:
     """
     Persist the archive to ``ARCHIVE_FILE`` (git-tracked, unlike ``data/``).
 
+    Validated first (Issue #109 review, B1) and written atomically via a
+    sibling temp file + ``os.replace`` (B1/N2) -- an interrupted write must
+    not truncate the only copy of the CPI history.
+
     Not safe against two concurrent runs racing this read-modify-write --
     each would merge into the same starting snapshot and whichever save
-    lands last would win, silently dropping the other's observations.
-    Accepted for now: this pipeline runs manually or from a single
-    monthly-cadence job, not a concurrent service.
+    lands last would win, silently dropping the other's observations. This
+    is a real if uncommon scenario (the dashboard's "Rebuild data &
+    features" button can trigger this path); take a lock here if it bites.
     """
-    archive_df[ARCHIVE_COLUMNS].to_csv(ARCHIVE_FILE, index=False)
+    validate_archive(archive_df)
+
+    temp_file = ARCHIVE_FILE.with_suffix(".csv.tmp")
+    archive_df[ARCHIVE_COLUMNS].to_csv(temp_file, index=False)
+    os.replace(temp_file, ARCHIVE_FILE)
     return ARCHIVE_FILE
 
 
-def rebuild_archive_from_raw_cache() -> pd.DataFrame:
+def rebuild_archive_from_raw_cache(merge_into_existing: bool = False) -> pd.DataFrame:
     """
     Rebuild the archive from every cached raw JSON pull in ``STATCAN_RAW_DIR``,
     oldest pull first so the newest pull's value wins any reference-month
-    overlap. Used to seed/recover the archive from raw pulls that predate
-    this fix rather than from a single day's ~210-month window.
+    overlap.
+
+    Derived from the raw pulls ALONE by default (Issue #109 review, B4):
+    this is the recovery/audit path, so seeding from the existing archive
+    would let it silently pass through any corruption a raw pull doesn't
+    happen to overwrite -- exactly the case this flag exists to catch --
+    and would make the result depend on prior filesystem state rather than
+    on the declared inputs. Pass ``merge_into_existing=True`` to union onto
+    the current archive instead.
     """
     cached_files = _sorted_cached_raw_files()
 
@@ -453,9 +570,20 @@ def rebuild_archive_from_raw_cache() -> pd.DataFrame:
             f"No cached Statistics Canada CPI JSON found in {STATCAN_RAW_DIR}"
         )
 
-    archive_df = load_archive()
+    if merge_into_existing:
+        archive_df = load_archive()
+    else:
+        archive_df = pd.DataFrame(
+            {
+                "reference_month": pd.Series(dtype="datetime64[ns]"),
+                "cpi_all_items": pd.Series(dtype="float64"),
+                "source_pull": pd.Series(dtype="object"),
+            }
+        )
+
     for raw_file in cached_files:
         pull_df = create_cpi_dataframe(load_raw_json(raw_file))
+        pull_df["source_pull"] = raw_file.name
         archive_df = merge_into_archive(archive_df, pull_df)
 
     save_archive(archive_df)
@@ -922,8 +1050,6 @@ def run(
     print(f"Window: {start} to {end}")
     print("=" * 60)
 
-    explicit_cache_file = cache_file is not None
-
     if use_cache:
 
         if cache_file is None:
@@ -942,15 +1068,11 @@ def run(
     data = load_raw_json(raw_file)
 
     pull_df = create_cpi_dataframe(data)
+    pull_df["source_pull"] = raw_file.name
 
     # Issue #109: this pull only covers StatCan's fixed ~210-month rolling
     # window, so merge it into the archive rather than trusting it alone --
-    # that preserves reference months this pull doesn't cover. An explicit
-    # --cache-file points at one specific historical snapshot for manual
-    # testing/debugging, not a genuine new pull, so it's merged in-memory
-    # for this run only and never persisted back to the shared, git-tracked
-    # archive -- otherwise a deliberately old file could silently overwrite
-    # newer archived values for whatever months it overlaps.
+    # that preserves reference months this pull doesn't cover.
     archive_df = merge_into_archive(load_archive(), pull_df)
 
     cpi_df = clamp_to_range(archive_df, "reference_month", start, end)
@@ -966,11 +1088,25 @@ def run(
 
     display_summary(cpi_df)
 
-    # Persist the archive only once the pull has fully validated -- a run
-    # that fails downstream (e.g. cpi_release_dates.csv doesn't cover a
-    # newly-pulled month yet) must not leave the shared archive mutated.
-    if not explicit_cache_file:
+    # Only a live pull may rewrite the shared, git-tracked archive (Issue
+    # #109 review, B2). A cache rebuild (--from-cache, with or without an
+    # explicit --cache-file) replays whatever raw JSON happens to be on
+    # this machine -- gitignored, so routinely older than the archive that
+    # arrived with the last `git pull` -- and letting it write back would
+    # silently revert a StatCan revision the archive already holds. This
+    # also restores the "offline and deterministic" contract
+    # src/pipeline_runner.py's mode="cache" documents. Persisting only
+    # after validate_dataframe() succeeds means a run that fails downstream
+    # (e.g. cpi_release_dates.csv doesn't cover a newly-pulled month yet)
+    # never leaves the shared archive mutated either way.
+    if not use_cache:
         save_archive(archive_df)
+    else:
+        print(
+            "\nNOTE: cache rebuild -- config/statcan_cpi_archive.csv was "
+            "used but not rewritten. Only a live pull updates the shared "
+            "archive."
+        )
 
     save_processed_data(cpi_df)
 
@@ -1045,8 +1181,21 @@ def parse_arguments() -> argparse.Namespace:
         help=(
             "Rebuild config/statcan_cpi_archive.csv (Issue #109) from every "
             "cached raw JSON pull in data/raw/statcan/, oldest first, instead "
-            "of running the ingestion pipeline. Use this to seed or recover "
-            "the archive from raw pulls that predate this fix."
+            "of running the ingestion pipeline. Derives from the raw pulls "
+            "alone by default -- use this to audit or recover the archive. "
+            "Combine with --merge-into-existing to seed it instead."
+        ),
+    )
+
+    parser.add_argument(
+        "--merge-into-existing",
+        action="store_true",
+        help=(
+            "With --rebuild-archive-from-raw-cache, union onto the existing "
+            "archive instead of deriving it from the raw pulls alone. Off "
+            "by default so a rebuild is reproducible from its stated "
+            "inputs and actually audits/recovers rather than preserving "
+            "whatever the archive already had."
         ),
     )
 
@@ -1062,10 +1211,12 @@ if __name__ == "__main__":
     arguments = parse_arguments()
 
     if arguments.rebuild_archive_from_raw_cache:
-        rebuilt = rebuild_archive_from_raw_cache()
+        rebuilt = rebuild_archive_from_raw_cache(
+            merge_into_existing=arguments.merge_into_existing
+        )
         print(
-            f"\nRebuilt {ARCHIVE_FILE} from cached raw JSON: "
-            f"{len(rebuilt)} reference months, "
+            f"\nRebuilt {ARCHIVE_FILE} from {len(_sorted_cached_raw_files())} "
+            f"cached raw pull(s): {len(rebuilt)} reference months, "
             f"{rebuilt['reference_month'].min().date()} to "
             f"{rebuilt['reference_month'].max().date()}."
         )

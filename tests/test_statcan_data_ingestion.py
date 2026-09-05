@@ -21,10 +21,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 import statcan_data_ingestion as sc  # noqa: E402
 
 
-def _cpi_df(months: list[str], values: list[float]) -> pd.DataFrame:
+def _cpi_df(
+    months: list[str], values: list[float], source: str = "test_fixture"
+) -> pd.DataFrame:
     return pd.DataFrame({
         "reference_month": pd.to_datetime(months),
         "cpi_all_items": values,
+        "source_pull": source,
     })
 
 
@@ -124,7 +127,9 @@ class TestRebuildArchiveFromRawCache:
             ["2009-01-01", "2009-02-01", "2009-03-01"], [113.0, 113.8, 114.0]
         )))
         newer.write_text(json.dumps(_raw_json(
-            ["2009-02-01", "2009-03-01", "2009-04-01"], [999.9, 114.0, 113.9]
+            # 113.8 -> 113.9 is a plausible small revision (within
+            # MAX_ARCHIVE_REVISION), unlike a rebasing-scale jump.
+            ["2009-02-01", "2009-03-01", "2009-04-01"], [113.9, 114.0, 113.9]
         )))
         # Ordering must come from the filename's embedded timestamp, not
         # mtime -- set mtimes backwards (newer file "older" on disk) to
@@ -142,7 +147,7 @@ class TestRebuildArchiveFromRawCache:
         # The newer pull's (filename-timestamp-wise) value must win on
         # overlap, despite its mtime being set older above.
         overlap = rebuilt.set_index("reference_month")["cpi_all_items"]
-        assert overlap.loc[pd.Timestamp("2009-02-01")] == pytest.approx(999.9)
+        assert overlap.loc[pd.Timestamp("2009-02-01")] == pytest.approx(113.9)
         # Persisted, not just returned
         assert sc.ARCHIVE_FILE.exists()
 
@@ -153,6 +158,201 @@ class TestRebuildArchiveFromRawCache:
 
         with pytest.raises(FileNotFoundError):
             sc.rebuild_archive_from_raw_cache()
+
+    def test_ignores_a_pre_existing_archive_by_default(self, tmp_path, monkeypatch):
+        """B4: this is the recovery/audit path, so it must derive from the
+        raw pulls alone by default -- seeding from the existing archive
+        would let an unattributed or corrupted row (one no raw pull
+        covers) silently survive the exact operation meant to catch it."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", tmp_path / "archive.csv")
+
+        # A month no raw pull covers -- e.g. a corrupted or unattributed row.
+        sc.save_archive(_cpi_df(["2009-01-01", "2009-02-01"], [113.0, 113.8]))
+        (raw_dir / f"cpi_{sc.VECTOR_ID}_20260101_000000.json").write_text(
+            json.dumps(_raw_json(["2009-01-01"], [113.0]))
+        )
+
+        rebuilt = sc.rebuild_archive_from_raw_cache()
+
+        assert len(rebuilt) == 1, "the unattributed row must not survive a rebuild"
+
+    def test_merge_into_existing_unions_onto_the_current_archive(
+        self, tmp_path, monkeypatch
+    ):
+        """With merge_into_existing=True, the archive's own rows are kept
+        alongside whatever the raw pulls add."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", tmp_path / "archive.csv")
+
+        sc.save_archive(_cpi_df(["2009-01-01"], [113.0]))
+        (raw_dir / f"cpi_{sc.VECTOR_ID}_20260101_000000.json").write_text(
+            json.dumps(_raw_json(["2009-02-01"], [113.8]))
+        )
+
+        rebuilt = sc.rebuild_archive_from_raw_cache(merge_into_existing=True)
+
+        assert len(rebuilt) == 2
+
+    def test_attaches_source_pull_provenance(self, tmp_path, monkeypatch):
+        """B5: every archived row must be traceable to the raw pull it
+        came from."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", tmp_path / "archive.csv")
+        filename = f"cpi_{sc.VECTOR_ID}_20260101_000000.json"
+        (raw_dir / filename).write_text(json.dumps(_raw_json(["2009-01-01"], [113.0])))
+
+        rebuilt = sc.rebuild_archive_from_raw_cache()
+
+        assert rebuilt.iloc[0]["source_pull"] == filename
+
+
+class TestMergeIntoArchiveRevisionGuard:
+    """Issue #109 review, B3: an overlapping value may only change by a
+    small (routine-revision-sized) amount before merge_into_archive()
+    refuses to apply it."""
+
+    def test_rebasing_scale_revision_is_rejected(self):
+        archive = _cpi_df(["2009-01-01"], [113.0])
+        rebased = _cpi_df(["2009-01-01"], [999.9])
+
+        with pytest.raises(ValueError, match="rebasing or a bad pull"):
+            sc.merge_into_archive(archive, rebased)
+
+    def test_small_revision_is_accepted(self):
+        archive = _cpi_df(["2009-01-01"], [113.0])
+        revised = _cpi_df(["2009-01-01"], [113.2])
+
+        merged = sc.merge_into_archive(archive, revised)
+
+        assert merged.iloc[0]["cpi_all_items"] == pytest.approx(113.2)
+
+    def test_null_value_never_overwrites_a_good_archived_value(self):
+        archive = _cpi_df(["2009-01-01"], [113.0])
+        pull_with_null = pd.DataFrame({
+            "reference_month": pd.to_datetime(["2009-01-01"]),
+            "cpi_all_items": [None],
+            "source_pull": ["test_fixture"],
+        })
+
+        merged = sc.merge_into_archive(archive, pull_with_null)
+
+        assert merged.iloc[0]["cpi_all_items"] == pytest.approx(113.0)
+
+
+class TestValidateArchive:
+    """Issue #109 review, B1: the full archive is validated before every
+    persist, not just the window a given run happens to request."""
+
+    def test_rejects_empty_archive(self):
+        empty = pd.DataFrame(columns=sc.ARCHIVE_COLUMNS)
+        with pytest.raises(ValueError, match="empty"):
+            sc.validate_archive(empty)
+
+    def test_rejects_null_cpi_value(self):
+        bad = pd.DataFrame({
+            "reference_month": pd.to_datetime(["2009-01-01"]),
+            "cpi_all_items": [None],
+            "source_pull": ["x"],
+        })
+        with pytest.raises(ValueError, match="null value"):
+            sc.validate_archive(bad)
+
+    def test_rejects_duplicate_reference_months(self):
+        dupe = pd.DataFrame({
+            "reference_month": pd.to_datetime(["2009-01-01", "2009-01-01"]),
+            "cpi_all_items": [113.0, 113.1],
+            "source_pull": ["x", "y"],
+        })
+        with pytest.raises(ValueError, match="duplicate"):
+            sc.validate_archive(dupe)
+
+    def test_rejects_a_gap_in_monthly_coverage(self):
+        gapped = pd.DataFrame({
+            "reference_month": pd.to_datetime(["2009-01-01", "2009-03-01"]),
+            "cpi_all_items": [113.0, 114.0],
+            "source_pull": ["x", "x"],
+        })
+        with pytest.raises(ValueError, match="gaps"):
+            sc.validate_archive(gapped)
+
+    def test_accepts_a_clean_continuous_archive(self):
+        clean = _cpi_df(["2009-01-01", "2009-02-01"], [113.0, 113.8])
+        sc.validate_archive(clean)  # must not raise
+
+    def test_out_of_window_null_cannot_reach_the_archive(self, tmp_path, monkeypatch):
+        """B1: the original defect was that run() validated a *clamped*
+        view (validate_dataframe on cpi_df) but persisted the *unclamped*
+        archive_df, so a null value in a reference month outside the
+        requested window bypassed every check entirely. Two layers now
+        prevent it: merge_into_archive() drops null values from the
+        incoming pull before they can overwrite anything, and
+        validate_archive() would still catch one on the full archive even
+        if it got that far. The net effect: the archive's original good
+        value survives untouched, not silently replaced by a null."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        archive_file = tmp_path / "archive.csv"
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
+
+        sc.save_archive(_cpi_df(["2009-01-01", "2009-02-01"], [113.0, 113.8]))
+
+        live_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260901_000000.json"
+        live_file.write_text(json.dumps(
+            _raw_json(["2009-01-01", "2009-02-01"], [None, 113.8])
+        ))
+        monkeypatch.setattr(sc, "download_raw_data", lambda **kw: live_file)
+
+        release_df = pd.DataFrame({
+            "reference_month": ["2009-01-01", "2009-02-01"],
+            "release_date": ["2009-02-20", "2009-03-19"],
+        })
+        monkeypatch.setattr(sc, "load_release_date_mapping", lambda: (
+            release_df.assign(
+                reference_month=pd.to_datetime(release_df["reference_month"]),
+                release_date=pd.to_datetime(release_df["release_date"]),
+            )
+        ))
+
+        # 2009-01 is OUTSIDE the requested window, so validate_dataframe()
+        # never sees it at all.
+        sc.run(use_cache=False, start_date="2009-02-01", end_date="2009-02-28")
+
+        assert sc.load_archive().set_index("reference_month") \
+            .loc[pd.Timestamp("2009-01-01"), "cpi_all_items"] == pytest.approx(113.0)
+
+
+class TestSaveArchiveAtomicity:
+    def test_rejected_write_leaves_previous_archive_intact(self, tmp_path, monkeypatch):
+        """N2: a write that fails validation must not corrupt/truncate the
+        existing file -- save_archive validates before it ever opens the
+        real path for writing."""
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", tmp_path / "archive.csv")
+        sc.save_archive(_cpi_df(["2009-01-01"], [113.0]))
+
+        bad = pd.DataFrame({
+            "reference_month": pd.to_datetime(["2009-01-01", "2009-01-01"]),
+            "cpi_all_items": [113.0, 114.0],
+            "source_pull": ["x", "y"],
+        })
+        with pytest.raises(ValueError):
+            sc.save_archive(bad)
+
+        assert sc.load_archive().iloc[0]["cpi_all_items"] == pytest.approx(113.0)
+
+    def test_no_leftover_temp_file_after_a_successful_save(self, tmp_path, monkeypatch):
+        archive_file = tmp_path / "archive.csv"
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
+        sc.save_archive(_cpi_df(["2009-01-01"], [113.0]))
+
+        assert not archive_file.with_suffix(".csv.tmp").exists()
 
 
 class TestRunUsesArchive:
@@ -215,7 +415,9 @@ class TestRunUsesArchive:
         sc.save_archive(_cpi_df(["2009-01-01"], [113.0]))
 
         cache_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260201_000000.json"
-        cache_file.write_text(json.dumps(_raw_json(["2009-01-01"], [999.9])))
+        # A small, plausible revision -- large enough to prove the archive
+        # wasn't overwritten, well within MAX_ARCHIVE_REVISION.
+        cache_file.write_text(json.dumps(_raw_json(["2009-01-01"], [113.5])))
 
         release_df = pd.DataFrame({
             "reference_month": ["2009-01-01"],
@@ -244,15 +446,21 @@ class TestRunUsesArchive:
     ):
         """A run that fails after the archive merge (e.g. cpi_release_dates.csv
         doesn't cover a newly-pulled month yet) must not leave the shared
-        archive file created/mutated -- only a fully-validated run persists."""
+        archive file created/mutated -- only a fully-validated run persists.
+
+        Uses use_cache=False (a live pull) so persistence is gated only by
+        validation succeeding, not by B2's separate cache-mode-never-persists
+        rule -- otherwise this would pass for the wrong reason regardless of
+        whether the validate-before-save ordering actually holds."""
         raw_dir = tmp_path / "raw"
         raw_dir.mkdir()
         archive_file = tmp_path / "archive.csv"
         monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
         monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
 
-        cache_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260201_000000.json"
-        cache_file.write_text(json.dumps(_raw_json(["2009-01-01"], [113.0])))
+        live_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260201_000000.json"
+        live_file.write_text(json.dumps(_raw_json(["2009-01-01"], [113.0])))
+        monkeypatch.setattr(sc, "download_raw_data", lambda **kw: live_file)
 
         # No release-date mapping at all for the pulled month -> validation
         # must raise inside align_to_release_dates/validate_dataframe.
@@ -263,11 +471,54 @@ class TestRunUsesArchive:
 
         with pytest.raises(ValueError):
             sc.run(
-                use_cache=True,
-                cache_file=cache_file,
+                use_cache=False,
                 start_date="2009-01-01",
                 end_date="2009-01-31",
             )
 
         assert not archive_file.exists(), \
             "A failed run must not create/persist the shared archive file"
+
+    def test_cache_rebuild_with_no_explicit_file_never_persists(
+        self, tmp_path, monkeypatch
+    ):
+        """B2: the dashboard's mode="cache" path calls run(use_cache=True,
+        cache_file=None), resolved via find_latest_cached_json() -- the
+        exact path that previously had zero coverage (N1). A stale local
+        pull must not revert a revision the archive already holds."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        archive_file = tmp_path / "archive.csv"
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
+        monkeypatch.setattr(sc, "PROCESSED_FILE", tmp_path / "statcan_cpi.csv")
+
+        sc.save_archive(_cpi_df(["2009-01-01"], [114.5]))  # revised value
+
+        # Delta kept within MAX_ARCHIVE_REVISION so this test isolates B2
+        # (cache mode never persists) from B3 (large-revision guard) --
+        # a plausible small reversion must still not be written back.
+        (raw_dir / f"cpi_{sc.VECTOR_ID}_20200101_000000.json").write_text(
+            json.dumps(_raw_json(["2009-01-01"], [114.0]))  # stale local pull
+        )
+
+        release_df = pd.DataFrame({
+            "reference_month": ["2009-01-01"],
+            "release_date": ["2009-02-20"],
+        })
+        monkeypatch.setattr(sc, "load_release_date_mapping", lambda: (
+            release_df.assign(
+                reference_month=pd.to_datetime(release_df["reference_month"]),
+                release_date=pd.to_datetime(release_df["release_date"]),
+            )
+        ))
+
+        sc.run(
+            use_cache=True,
+            cache_file=None,
+            start_date="2009-01-01",
+            end_date="2009-01-31",
+        )
+
+        assert sc.load_archive().iloc[0]["cpi_all_items"] == pytest.approx(114.5), \
+            "A cache-mode rebuild with no explicit file must not overwrite the archive"
