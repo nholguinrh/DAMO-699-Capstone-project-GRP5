@@ -157,11 +157,17 @@ scheduled GitHub Action.
   or other imputation is applied at this stage.
 - Trading-day / market-calendar alignment and holiday treatment are **not
   yet applied** and will be decided during cleaning and feature engineering.
-- CPI release-date alignment is mapped for 208 of 210 months from
-  2009-01 through 2026-06 (see above). `statcan_cpi.csv` includes both
-  `reference_month` and `release_date` for every observation; **2010-04
-  and 2010-09 have a null `release_date`** by design (documented known
-  gap, not a pipeline bug — see `KNOWN_UNMAPPED_CPI_MONTHS` above).
+- CPI release-date alignment is mapped from 2009-01 through the current
+  calendar month, with exactly two known gaps (see above). The end of
+  this range is not a fixed date: `build_cpi_release_dates.py` defaults
+  to (and the monthly refresh workflow explicitly asserts) completeness
+  through whichever month is current when it runs, so the range keeps
+  advancing on its own — see "CPI release-date mapping" above rather
+  than treating any specific end month as current. `statcan_cpi.csv`
+  includes both `reference_month` and `release_date` for every
+  observation; **2010-04 and 2010-09 have a null `release_date`** by
+  design (documented known gap, not a pipeline bug — see
+  `KNOWN_UNMAPPED_CPI_MONTHS` above).
   Anything consuming `statcan_cpi.csv` downstream (cleaning,
   feature engineering, the VAR baseline) must decide explicitly how to
   handle these 2 rows (drop, impute, or otherwise) rather than assume

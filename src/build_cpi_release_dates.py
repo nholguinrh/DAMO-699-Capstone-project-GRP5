@@ -34,7 +34,7 @@ from __future__ import annotations
 import io
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -44,8 +44,6 @@ try:
 except ImportError:
     BeautifulSoup = None  # only needed for the pre-2012 fallback
 
-START_YEAR = 2009
-END_YEAR = 2026
 TARGET_START = datetime(2009, 1, 1)
 
 
@@ -65,13 +63,23 @@ def _default_target_end(today: datetime | None = None) -> datetime:
     scheduled", and it made write_mapping()'s forward-preserving
     effective_end silently overshoot target_end (see write_mapping()).
 
-    Takes an explicit ``today`` (UTC) so callers/tests can pin the clock
-    instead of inheriting a real one, and is resolved at call time by
+    Uses the local clock (like ``pipeline_dates.resolve_date_range()``'s own
+    ``date.today()`` default), not UTC. The only caller that actually needs
+    this default resolved is a plain local invocation of this script; the
+    scheduled GitHub Actions refresh always passes its own explicit
+    ``--target-end`` computed with ``date -u`` (see refresh-cpi-dates.yml),
+    so the CI path and this default never need to agree on a clock -- and
+    matching the pipeline's local-time convention here means a developer
+    running both around local midnight sees the same reference month from
+    each, rather than a UTC/local day-boundary mismatch between them.
+
+    Takes an explicit ``today`` so callers/tests can pin the clock instead
+    of inheriting a real one, and is resolved at call time by
     ``_coerce_target_end`` -- never cached at import time -- so a long-lived
     process crossing a month boundary picks up the new month, and this
     default can never itself go stale the way a hardcoded date would.
     """
-    today = today or datetime.now(timezone.utc)
+    today = today or datetime.now()
     return datetime(today.year, today.month, 1)
 
 # This script lives in src/. config/ is a sibling of src/.
@@ -338,10 +346,20 @@ def _coerce_target_end(target_end: str | datetime | None) -> datetime:
     ``_default_target_end``), not at import time, so a long-lived process
     crossing a month boundary picks up the new month rather than a snapshot
     frozen at import.
+
+    A tz-aware ``target_end`` (e.g. a caller passing
+    ``datetime.now(timezone.utc)`` directly instead of a plain string) is
+    normalised to naive by dropping the tzinfo -- every other datetime in
+    this module (``TARGET_START``, the parsed mapping keys, the
+    ``_default_target_end()`` local-clock default) is naive, and comparing a
+    naive and an aware datetime raises ``TypeError`` rather than doing
+    anything useful.
     """
     if target_end is None:
         return _default_target_end()
     if isinstance(target_end, datetime):
+        if target_end.tzinfo is not None:
+            target_end = target_end.replace(tzinfo=None)
         return target_end
     return datetime.strptime(str(target_end).strip()[:10], "%Y-%m-%d")
 

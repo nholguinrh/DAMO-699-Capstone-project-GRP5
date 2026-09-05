@@ -69,6 +69,18 @@ class TestCoerceTargetEnd:
         dt = datetime(2027, 3, 1)
         assert bcrd._coerce_target_end(dt) is dt
 
+    def test_normalizes_tz_aware_datetime_to_naive(self):
+        """A caller passing e.g. datetime.now(timezone.utc) directly must not
+        blow up comparisons against the naive datetimes used everywhere else
+        in this module (TARGET_START, parsed mapping keys, the local-clock
+        _default_target_end() default)."""
+        aware = datetime(2027, 3, 1, 12, 30, tzinfo=timezone.utc)
+        result = bcrd._coerce_target_end(aware)
+        assert result == datetime(2027, 3, 1, 12, 30)
+        assert result.tzinfo is None
+        # And the result must actually be comparable to a naive datetime.
+        assert result > bcrd.TARGET_START
+
 
 class TestMissingMonths:
     def test_no_missing_when_every_month_mapped(self):
