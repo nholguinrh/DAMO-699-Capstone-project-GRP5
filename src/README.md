@@ -138,6 +138,46 @@ their own — the mapping is only refreshed when explicitly requested via
 `--refresh-cpi-dates`, by running the build script directly, or by the
 scheduled GitHub Action.
 
+## CPI value archive (`config/statcan_cpi_archive.csv`)
+
+StatCan's `getDataFromVectorByReferencePeriodRange` endpoint ignores the
+`endReferencePeriod` we ask for and always returns a fixed ~210-observation
+rolling window anchored to the latest published month (Issue #109). As new
+months publish, that window slides forward and the oldest reference months
+silently fall off the front of every fresh pull. `config/statcan_cpi_archive.csv`
+is a git-tracked, append-only union of every reference month ever pulled — it,
+not any single API response, is the canonical source of CPI history feeding
+the Gold feature store.
+
+**Operational contract:**
+
+- **Never hand-edit or delete this file.** It's rebuilt by
+  `merge_into_archive()` inside `statcan_data_ingestion.run()`, validated in
+  full by `validate_archive()` before every write, and written atomically.
+- **Only a live pull (`use_cache=False`) updates it.** A cache-mode rebuild
+  (`--from-cache`, including the dashboard's "Cached rebuild" button) reads
+  it but never writes back — the local raw JSON cache is gitignored and
+  routinely older than the archive that arrived with your last `git pull`,
+  so letting a cache rebuild persist could silently revert a StatCan
+  revision the archive already holds.
+- **A revision that moves an archived value by more than
+  `MAX_ARCHIVE_REVISION` (1.0 index point)** is refused rather than applied
+  — that's far more likely a CPI basket rebasing, a bad pull, or a
+  corrupted archive than a routine revision.
+- **Every row carries `source_pull`**, the raw JSON filename its value came
+  from. The seed pulls (`data/raw/statcan/cpi_*.json`) are committed
+  (exempted from the `data/raw/` gitignore) specifically so every archived
+  observation is independently derivable from the repo, not an
+  unattributed number in a CSV.
+
+**Recovery / audit:** `python statcan_data_ingestion.py --rebuild-archive-from-raw-cache`
+rebuilds the archive from every cached raw JSON pull in `data/raw/statcan/`
+alone (oldest first), ignoring whatever the current archive file contains —
+this is the tool to reach for if the archive is ever suspected corrupt. Pass
+`--merge-into-existing` to union onto the current archive instead of
+replacing it (e.g. when seeding from a new raw pull without discarding
+existing history that pull doesn't cover).
+
 ## Output locations
 
 | Type | Path |
