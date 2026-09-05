@@ -10,6 +10,17 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # This repo's default GITHUB_TOKEN permissions are read-only (checked via
+    # `gh api repos/.../actions/permissions/workflow`), so without this block
+    # peter-evans/create-pull-request's push + PR-creation step 403s silently
+    # -- the script runs and computes an updated mapping, but the result is
+    # discarded. This is almost certainly why config/cpi_release_dates.csv has
+    # never been touched since its initial commit despite the monthly cron
+    # (Issue #110's real root cause, independent of the --target-end logic
+    # elsewhere in this PR).
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -22,8 +33,35 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 pdfplumber
 
+      - name: Compute target-end
+        id: target_end
+        # Issue #110: this job used to call the script with no arguments, so
+        # target_end fell back to a fixed constant that never advanced.
+        #
+        # StatCan's schedule feed is a *forward* calendar: verified live, it
+        # carries scheduled CPI release dates several reference months ahead
+        # (e.g. a September fetch already has a scheduled release for the
+        # following February). The current month is therefore always already
+        # scheduled, and asserting completeness through it is safe. We use
+        # the current month rather than a deeper forward horizon so the
+        # assertion never depends on how far ahead StatCan happens to
+        # publish. (A "last month" back-off was tried and reverted -- besides
+        # resting on a mistaken model of the feed, `date -d '1 month ago'`
+        # also silently returns the *current* month on a day-29-31 dispatch,
+        # since GNU date normalises the calendar overflow instead of
+        # clamping it.)
+        #
+        # NOTE (review round 3): --target-end governs the *completeness
+        # assertion* only -- write_mapping() never truncates the file to it
+        # (by design: a narrower target_end than a previous run must not
+        # delete forward-known release dates), and the feed's own forward
+        # schedule is always further out than any value computed here. The
+        # committed CSV's actual coverage is whatever the feed returns, not
+        # this value -- see the PR body wording below.
+        run: echo "value=$(date -u +%Y-%m-01)" >> "$GITHUB_OUTPUT"
+
       - name: Run refresh script
-        run: python src/build_cpi_release_dates.py
+        run: python src/build_cpi_release_dates.py --target-end "${{ steps.target_end.outputs.value }}"
 
       - name: Open PR if the mapping changed
         uses: peter-evans/create-pull-request@v6
@@ -32,7 +70,13 @@ jobs:
           title: "Monthly CPI release-date refresh"
           body: |
             Automated monthly refresh of `config/cpi_release_dates.csv`
-            from Statistics Canada's official release calendars.
+            from Statistics Canada's official release calendars, asserted
+            complete through ${{ steps.target_end.outputs.value }}.
+
+            The committed file may (and typically does) extend further --
+            StatCan's schedule feed publishes several months of forward-
+            scheduled release dates, and this refresh never truncates rows
+            beyond the asserted month above.
 
             Please review the diff before merging -- this only updates
             reference-month-to-release-date mappings, no pipeline logic.
