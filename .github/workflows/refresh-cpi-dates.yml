@@ -24,13 +24,14 @@ jobs:
 
       - name: Compute target-end
         id: target_end
-        # Issue #110: build_cpi_release_dates.py's own TARGET_END default is a
-        # fixed constant (last bumped for this project's timeline) -- calling
-        # the script with no arguments, as this job used to, never advances
-        # past it, so the mapping stops growing once the ingestion window
-        # catches up to that date. Compute the current month here instead, so
-        # this workflow keeps itself current with zero manual maintenance.
-        run: echo "value=$(date -u +%Y-%m-01)" >> "$GITHUB_OUTPUT"
+        # Issue #110: this job used to call the script with no arguments, so
+        # target_end fell back to a fixed constant that never advanced --
+        # the mapping stopped growing once the ingestion window caught up to
+        # it. Compute *last* calendar month here instead: StatCan releases
+        # reference month M around the 20th of month M+1, so the current
+        # month is never published yet at run time -- targeting it would
+        # make missing_months() flag it every single run.
+        run: echo "value=$(date -u -d '1 month ago' +%Y-%m-01)" >> "$GITHUB_OUTPUT"
 
       - name: Run refresh script
         run: python src/build_cpi_release_dates.py --target-end "${{ steps.target_end.outputs.value }}"

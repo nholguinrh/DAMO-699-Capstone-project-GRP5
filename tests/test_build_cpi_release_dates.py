@@ -21,6 +21,30 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 import build_cpi_release_dates as bcrd  # noqa: E402
 
 
+class TestDefaultTargetEnd:
+    """Regression tests for the second review finding on #110: targeting the
+    *current* month would flag it "missing" on every single run, since
+    StatCan never has it published yet at run time."""
+
+    def test_targets_last_calendar_month_not_the_current_one(self):
+        today = datetime.now()
+        first_of_this_month = today.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
+        default_end = bcrd._default_target_end()
+
+        assert default_end < first_of_this_month
+        assert default_end.day == 1
+        # Must be within the immediately preceding month, not further back.
+        assert (first_of_this_month - default_end).days <= 31
+
+    def test_target_end_constant_is_derived_not_hardcoded(self):
+        """TARGET_END must track _default_target_end()'s current value --
+        a hardcoded date is exactly the bug this issue was about."""
+        assert bcrd.TARGET_END.date() == bcrd._default_target_end().date()
+
+
 class TestCoerceTargetEnd:
     def test_none_falls_back_to_module_default(self):
         assert bcrd._coerce_target_end(None) == bcrd.TARGET_END

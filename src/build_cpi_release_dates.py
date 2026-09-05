@@ -22,9 +22,11 @@ Usage:
 Output:
     config/cpi_release_dates.csv  with columns: reference_month, release_date
     Covers every month from 2009-01 through --target-end (default: TARGET_END,
-    currently 2026-06 -- see Issue #110). The scheduled GitHub Actions refresh
-    always passes an explicit --target-end computed at run time, so it keeps
-    extending the mapping every month without needing this default bumped.
+    the most recent month StatCan is expected to have already published --
+    see Issue #110). The scheduled GitHub Actions refresh also passes an
+    explicit --target-end computed at run time, so both the CI job and a
+    plain local invocation keep extending the mapping every month with no
+    date ever needing to be bumped by hand.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from __future__ import annotations
 import io
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -45,12 +47,31 @@ except ImportError:
 START_YEAR = 2009
 END_YEAR = 2026
 TARGET_START = datetime(2009, 1, 1)
-# Local/manual-run default only when --target-end is omitted (Issue #110).
-# .github/workflows/refresh-cpi-dates.yml always passes an explicit
-# --target-end computed at run time (the current month), so this fixed date
-# does not need bumping for the scheduled refresh to keep working -- only a
-# local invocation with no flag falls back to it.
-TARGET_END = datetime(2026, 6, 1)
+
+
+def _default_target_end() -> datetime:
+    """
+    Local/manual-run default when --target-end is omitted: the most recent
+    calendar month StatCan is expected to have already published.
+
+    StatCan releases reference month M's CPI around the 20th of month M+1
+    (confirmed by config/cpi_release_dates.csv's consistent ~1-month lag),
+    so "last calendar month" -- not the current one -- is the newest month
+    a fresh run can expect to actually map. Targeting the current month
+    instead would flag it "missing" on every single run, since it's never
+    published yet at run time (Issue #110).
+
+    Computed at import time from the real clock (not a hardcoded date), so
+    this default keeps itself current instead of going stale like the
+    fixed TARGET_END this replaced.
+    """
+    first_of_this_month = datetime.now().replace(day=1)
+    last_month_end = first_of_this_month - timedelta(days=1)
+    return last_month_end.replace(day=1)
+
+
+# Not a hardcoded constant -- see _default_target_end()'s docstring.
+TARGET_END = _default_target_end()
 
 # This script lives in src/. config/ is a sibling of src/.
 REPO_ROOT = Path(__file__).resolve().parent.parent
