@@ -21,12 +21,12 @@ Usage:
 
 Output:
     config/cpi_release_dates.csv  with columns: reference_month, release_date
-    Covers every month from 2009-01 through --target-end (default: TARGET_END,
-    the most recent month StatCan is expected to have already published --
-    see Issue #110). The scheduled GitHub Actions refresh also passes an
-    explicit --target-end computed at run time, so both the CI job and a
-    plain local invocation keep extending the mapping every month with no
-    date ever needing to be bumped by hand.
+    Covers every month from 2009-01 through --target-end (default: the
+    current calendar month -- see Issue #110 and _default_target_end()'s
+    docstring for why that's safe). The scheduled GitHub Actions refresh
+    also passes an explicit --target-end computed at run time, so both the
+    CI job and a plain local invocation keep extending the mapping every
+    month with no date ever needing to be bumped by hand.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from __future__ import annotations
 import io
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -49,29 +49,30 @@ END_YEAR = 2026
 TARGET_START = datetime(2009, 1, 1)
 
 
-def _default_target_end() -> datetime:
+def _default_target_end(today: datetime | None = None) -> datetime:
     """
-    Local/manual-run default when --target-end is omitted: the most recent
-    calendar month StatCan is expected to have already published.
+    Default when --target-end is omitted: the current calendar month.
 
-    StatCan releases reference month M's CPI around the 20th of month M+1
-    (confirmed by config/cpi_release_dates.csv's consistent ~1-month lag),
-    so "last calendar month" -- not the current one -- is the newest month
-    a fresh run can expect to actually map. Targeting the current month
-    instead would flag it "missing" on every single run, since it's never
-    published yet at run time (Issue #110).
+    StatCan's schedule feed (the primary source, fetch_from_json_feed) is a
+    *forward* calendar, not a backward log: verified live against the real
+    feed, it already carries a scheduled CPI release date for the current
+    reference month, and for several months beyond it (e.g. a fetch in
+    September 2026 already has a scheduled release for February 2027). The
+    current month is therefore always already mapped by a fresh fetch, and
+    asserting completeness through it is safe (Issue #110). A shallower
+    "last month" horizon was tried and reverted -- it rests on confusing
+    "has the CPI *value* been published" with "is the release *date*
+    scheduled", and it made write_mapping()'s forward-preserving
+    effective_end silently overshoot target_end (see write_mapping()).
 
-    Computed at import time from the real clock (not a hardcoded date), so
-    this default keeps itself current instead of going stale like the
-    fixed TARGET_END this replaced.
+    Takes an explicit ``today`` (UTC) so callers/tests can pin the clock
+    instead of inheriting a real one, and is resolved at call time by
+    ``_coerce_target_end`` -- never cached at import time -- so a long-lived
+    process crossing a month boundary picks up the new month, and this
+    default can never itself go stale the way a hardcoded date would.
     """
-    first_of_this_month = datetime.now().replace(day=1)
-    last_month_end = first_of_this_month - timedelta(days=1)
-    return last_month_end.replace(day=1)
-
-
-# Not a hardcoded constant -- see _default_target_end()'s docstring.
-TARGET_END = _default_target_end()
+    today = today or datetime.now(timezone.utc)
+    return datetime(today.year, today.month, 1)
 
 # This script lives in src/. config/ is a sibling of src/.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -293,10 +294,15 @@ def parse_pairs(section_text: str) -> list[tuple[datetime, datetime]]:
     return results
 
 
-def fetch_from_annual_calendars(years: range) -> dict[datetime, datetime]:
+def fetch_from_annual_calendars(
+    years: range,
+    target_end: str | datetime | None = None,
+) -> dict[datetime, datetime]:
     """
     Fallback scraper for years the JSON feed doesn't cover (pre-2012).
     """
+
+    end = _coerce_target_end(target_end)
 
     mapping: dict[datetime, datetime] = {}
     for year in years:
@@ -311,7 +317,7 @@ def fetch_from_annual_calendars(years: range) -> dict[datetime, datetime]:
 
         added = 0
         for release_date, reference_month in pairs:
-            if TARGET_START <= reference_month <= TARGET_END:
+            if TARGET_START <= reference_month <= end:
                 mapping[reference_month] = release_date
                 added += 1
         print(f"  Parsed {len(pairs)} rows, {added} in target range")
@@ -325,9 +331,16 @@ def fetch_from_annual_calendars(years: range) -> dict[datetime, datetime]:
 # ---------------------------------------------------------------------
 
 def _coerce_target_end(target_end: str | datetime | None) -> datetime:
-    """Normalise a target end (str / datetime / None) to a datetime; None → TARGET_END."""
+    """
+    Normalise a target end (str / datetime / None) to a datetime.
+
+    ``None`` resolves against the clock at *call* time (see
+    ``_default_target_end``), not at import time, so a long-lived process
+    crossing a month boundary picks up the new month rather than a snapshot
+    frozen at import.
+    """
     if target_end is None:
-        return TARGET_END
+        return _default_target_end()
     if isinstance(target_end, datetime):
         return target_end
     return datetime.strptime(str(target_end).strip()[:10], "%Y-%m-%d")
@@ -359,8 +372,9 @@ def is_mapping_complete(
     Lightweight, no-network check used by other pipeline code (e.g.
     run_data_collection.py) to decide whether a refresh is needed.
 
-    ``target_end`` defaults to ``TARGET_END``; pass a later date to check
-    whether the mapping already covers an extended ingestion window.
+    ``target_end`` defaults to the current calendar month (see
+    ``_default_target_end``); pass a later date to check whether the
+    mapping already covers an extended ingestion window.
     """
 
     if not csv_path.exists():
@@ -411,7 +425,8 @@ def build_mapping(
     calendar scraper as fallback only for months the JSON feed
     doesn't cover (pre-2012).
 
-    ``target_end`` extends the coverage check forward (default ``TARGET_END``).
+    ``target_end`` extends the coverage check forward (default: the current
+    calendar month -- see ``_default_target_end``).
     """
 
     mapping = fetch_from_json_feed()
@@ -429,7 +444,8 @@ def build_mapping(
             "Falling back to annual calendars for those years."
         )
         fallback_mapping = fetch_from_annual_calendars(
-            range(earliest_missing_year, latest_missing_year + 2)  # +2: overlap buffer
+            range(earliest_missing_year, latest_missing_year + 2),  # +2: overlap buffer
+            target_end=target_end,
         )
         # JSON feed data always wins on overlap; fallback only fills real gaps
         for ref_month, release_date in fallback_mapping.items():
@@ -455,18 +471,32 @@ def write_mapping(
     mapping: dict[datetime, datetime],
     csv_path: Path = OUTPUT_PATH,
     target_end: str | datetime | None = None,
-) -> None:
+) -> int:
+    """
+    Write ``mapping`` to ``csv_path`` and return the number of rows written.
+
+    Never truncates release dates the fetch already found beyond ``end`` --
+    a narrower ``target_end`` than a previous run must not delete
+    forward-known release dates from the CSV. StatCan's schedule feed is a
+    forward calendar (see ``_default_target_end``), so on any real run
+    ``effective_end`` routinely sits past ``target_end`` -- callers that
+    need to reconcile a printed row count against the file must use this
+    return value, not recompute a count against ``target_end`` alone.
+    """
     end = _coerce_target_end(target_end)
     # Never truncate release dates the fetch already found beyond `end` -- a
     # narrower target_end than a previous run must not delete forward-known
     # release dates from the CSV.
     effective_end = max(end, max(mapping.keys())) if mapping else end
     csv_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("reference_month,release_date\n")
         for ref_month in sorted(mapping):
             if TARGET_START <= ref_month <= effective_end:
                 f.write(f"{ref_month:%Y-%m-01},{mapping[ref_month]:%Y-%m-%d}\n")
+                written += 1
+    return written
 
 
 def refresh(
@@ -478,8 +508,9 @@ def refresh(
         from build_cpi_release_dates import refresh
         refresh()
 
-    ``target_end`` (str / datetime, default ``TARGET_END``) extends the mapped
-    window forward when the ingestion pipeline pulls past the current cut-off.
+    ``target_end`` (str / datetime, default: the current calendar month --
+    see ``_default_target_end``) extends the mapped window forward when the
+    ingestion pipeline pulls past the current cut-off.
     """
 
     end = _coerce_target_end(target_end)
@@ -496,10 +527,20 @@ def refresh(
         print(f"\nComplete: all months from {TARGET_START:%Y-%m} to "
               f"{end:%Y-%m} are mapped.")
 
-    write_mapping(mapping, csv_path, end)
+    written = write_mapping(mapping, csv_path, end)
+    asserted = len([m for m in mapping if TARGET_START <= m <= end])
 
-    print(f"\nWrote {len([m for m in mapping if TARGET_START <= m <= end])} "
-          f"rows to {csv_path}")
+    print(f"\nWrote {written} rows to {csv_path}")
+    if written > asserted:
+        # Not an error: StatCan's schedule feed publishes release dates for
+        # reference months beyond `end`, and write_mapping() preserves them
+        # rather than truncating. Reported explicitly so this count always
+        # reconciles against the committed CSV.
+        print(
+            f"  ({asserted} rows through the asserted target-end {end:%Y-%m}; "
+            f"{written - asserted} further row(s) carry StatCan's "
+            "forward-scheduled release dates.)"
+        )
     print("Sources:")
     print(f"  Primary (2012-03 onward): {JSON_FEED_URL}")
     print("  Fallback (pre-2012): https://www150.statcan.gc.ca/n1/release-diffusion/"
@@ -519,9 +560,9 @@ if __name__ == "__main__":
         "--target-end",
         default=None,
         help=(
-            "ISO (YYYY-MM-DD) last reference month to map. Defaults to "
-            f"{TARGET_END:%Y-%m}. Use a later date when the ingestion window "
-            "is extended past the current cut-off."
+            "ISO (YYYY-MM-DD) last reference month to map. Defaults to the "
+            "current calendar month. Use a later date when the ingestion "
+            "window is extended past the current cut-off."
         ),
     )
     args = parser.parse_args()

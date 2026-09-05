@@ -2,15 +2,15 @@
 Unit tests for src/build_cpi_release_dates.py's target-end handling (Issue #110).
 
 The scheduled refresh workflow used to call this script with no arguments,
-so ``target_end`` always fell back to the module's fixed ``TARGET_END``
-constant -- once real time passed that date, the workflow kept "refreshing"
-the mapping without ever extending it. These tests cover the pure date-logic
-functions the fix (workflow now passes an explicit, run-time-computed
-``--target-end``) depends on; no network access is exercised.
+so ``target_end`` always fell back to a fixed constant -- once real time
+passed that date, the workflow kept "refreshing" the mapping without ever
+extending it. These tests cover the pure date-logic functions the fix
+(workflow now passes an explicit, run-time-computed ``--target-end``)
+depends on; no network access is exercised.
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -22,46 +22,52 @@ import build_cpi_release_dates as bcrd  # noqa: E402
 
 
 class TestDefaultTargetEnd:
-    """Regression tests for the second review finding on #110: targeting the
-    *current* month would flag it "missing" on every single run, since
-    StatCan never has it published yet at run time."""
+    """The default horizon must be derived from the clock, never hardcoded --
+    but the tests must pin that clock, or they inherit the exact staleness
+    and month-boundary raciness Issue #110 was about.
 
-    def test_targets_last_calendar_month_not_the_current_one(self):
-        today = datetime.now()
-        first_of_this_month = today.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
+    StatCan's schedule feed is a *forward* calendar (verified live against
+    the real feed: a fetch today already carries a scheduled release date
+    several reference months ahead), so the current month -- not a "last
+    month" back-off -- is the correct, always-safe default."""
 
-        default_end = bcrd._default_target_end()
+    @pytest.mark.parametrize(
+        "now, expected",
+        [
+            (datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc), datetime(2026, 9, 1)),
+            # Month boundary, both sides.
+            (datetime(2026, 8, 31, 23, 59, 59, tzinfo=timezone.utc), datetime(2026, 8, 1)),
+            (datetime(2026, 9, 1, 0, 0, 0, tzinfo=timezone.utc), datetime(2026, 9, 1)),
+            # Day 29-31 following a shorter month.
+            (datetime(2026, 3, 31, 0, 0, tzinfo=timezone.utc), datetime(2026, 3, 1)),
+            (datetime(2027, 1, 31, 0, 0, tzinfo=timezone.utc), datetime(2027, 1, 1)),
+        ],
+    )
+    def test_resolves_to_first_of_the_current_month(self, now, expected):
+        assert bcrd._default_target_end(today=now) == expected
 
-        assert default_end < first_of_this_month
-        assert default_end.day == 1
-        # Must be within the immediately preceding month, not further back.
-        assert (first_of_this_month - default_end).days <= 31
+    def test_none_resolves_at_call_time_not_import_time(self, monkeypatch):
+        """A long-lived process crossing a month boundary must pick up the
+        new month, not replay a value snapshotted once at import."""
+        seen = []
 
-    def test_target_end_constant_is_derived_not_hardcoded(self):
-        """TARGET_END must track _default_target_end()'s current value --
-        a hardcoded date is exactly the bug this issue was about."""
-        assert bcrd.TARGET_END.date() == bcrd._default_target_end().date()
+        def fake_default(today=None):
+            seen.append(1)
+            return datetime(2026, 9, 1)
+
+        monkeypatch.setattr(bcrd, "_default_target_end", fake_default)
+        assert bcrd._coerce_target_end(None) == datetime(2026, 9, 1)
+        assert bcrd._coerce_target_end(None) == datetime(2026, 9, 1)
+        assert len(seen) == 2  # re-derived on every call, not cached
 
 
 class TestCoerceTargetEnd:
-    def test_none_falls_back_to_module_default(self):
-        assert bcrd._coerce_target_end(None) == bcrd.TARGET_END
-
     def test_accepts_iso_string(self):
         assert bcrd._coerce_target_end("2027-03-01") == datetime(2027, 3, 1)
 
     def test_accepts_datetime_passthrough(self):
         dt = datetime(2027, 3, 1)
         assert bcrd._coerce_target_end(dt) is dt
-
-    def test_a_later_string_extends_past_the_module_default(self):
-        """The exact mechanism the workflow fix relies on: passing a
-        run-time-computed date must extend coverage past TARGET_END,
-        not be silently capped by it."""
-        later = bcrd._coerce_target_end("2030-01-01")
-        assert later > bcrd.TARGET_END
 
 
 class TestMissingMonths:
@@ -81,8 +87,8 @@ class TestMissingMonths:
 
     def test_extending_target_end_surfaces_new_gaps_not_previously_checked(self):
         """This is the actual bug: with a stale target_end, months beyond it
-        are never even checked, so a workflow run against the old fixed
-        TARGET_END would report "complete" while real gaps exist further out."""
+        are never even checked, so a workflow run against a stale fixed
+        target_end would report "complete" while real gaps exist further out."""
         mapping = {datetime(2009, 1, 1): datetime(2009, 2, 20)}
 
         assert bcrd.missing_months(mapping, target_end="2009-01-01") == []
@@ -126,11 +132,11 @@ class TestLatestMappedMonth:
 
 
 class TestWriteMapping:
-    def test_writes_rows_through_explicit_target_end_past_module_default(self, tmp_path):
-        """The write path must not silently cap output at TARGET_END when a
-        later target_end is explicitly requested -- otherwise passing
-        --target-end from the workflow would compute a wider window but
-        still truncate the file back down."""
+    def test_writes_rows_past_target_end_when_the_mapping_already_has_them(self, tmp_path):
+        """The write path must not cap output at target_end when the mapping
+        (e.g. from StatCan's forward-scheduling feed) already extends past
+        it -- otherwise passing --target-end from the workflow would compute
+        a wider window but still truncate the file back down."""
         csv_path = tmp_path / "cpi_release_dates.csv"
         mapping = {
             datetime(2026, 6, 1): datetime(2026, 7, 20),
@@ -157,3 +163,22 @@ class TestWriteMapping:
 
         written = csv_path.read_text()
         assert "2026-07-01" in written
+
+    def test_writes_forward_scheduled_rows_and_returns_the_true_count(self, tmp_path):
+        """write_mapping must never cap at target_end -- and must report the
+        row count it actually wrote, so refresh()'s log reconciles with the
+        CSV rather than under-reporting relative to StatCan's forward
+        schedule."""
+        csv_path = tmp_path / "cpi_release_dates.csv"
+        mapping = {
+            datetime(2026, 6, 1): datetime(2026, 7, 20),
+            datetime(2026, 7, 1): datetime(2026, 8, 19),
+            datetime(2026, 8, 1): datetime(2026, 9, 15),
+            datetime(2026, 9, 1): datetime(2026, 10, 20),
+        }
+
+        written = bcrd.write_mapping(mapping, csv_path, target_end="2026-07-01")
+
+        rows = csv_path.read_text().strip().splitlines()[1:]
+        assert written == len(rows) == 4  # not capped at target_end
+        assert rows[-1].startswith("2026-09-01")  # forward schedule preserved

@@ -25,13 +25,21 @@ jobs:
       - name: Compute target-end
         id: target_end
         # Issue #110: this job used to call the script with no arguments, so
-        # target_end fell back to a fixed constant that never advanced --
-        # the mapping stopped growing once the ingestion window caught up to
-        # it. Compute *last* calendar month here instead: StatCan releases
-        # reference month M around the 20th of month M+1, so the current
-        # month is never published yet at run time -- targeting it would
-        # make missing_months() flag it every single run.
-        run: echo "value=$(date -u -d '1 month ago' +%Y-%m-01)" >> "$GITHUB_OUTPUT"
+        # target_end fell back to a fixed constant that never advanced.
+        #
+        # StatCan's schedule feed is a *forward* calendar: verified live, it
+        # carries scheduled CPI release dates several reference months ahead
+        # (e.g. a September fetch already has a scheduled release for the
+        # following February). The current month is therefore always already
+        # scheduled, and asserting completeness through it is safe. We use
+        # the current month rather than a deeper forward horizon so the
+        # assertion never depends on how far ahead StatCan happens to
+        # publish. (A "last month" back-off was tried and reverted -- besides
+        # resting on a mistaken model of the feed, `date -d '1 month ago'`
+        # also silently returns the *current* month on a day-29-31 dispatch,
+        # since GNU date normalises the calendar overflow instead of
+        # clamping it.)
+        run: echo "value=$(date -u +%Y-%m-01)" >> "$GITHUB_OUTPUT"
 
       - name: Run refresh script
         run: python src/build_cpi_release_dates.py --target-end "${{ steps.target_end.outputs.value }}"
