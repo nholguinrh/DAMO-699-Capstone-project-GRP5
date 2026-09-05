@@ -418,8 +418,8 @@ def test_run_clark_west_battery_smoke(clark_west_battery_results):
     assert len(sensitivity_df) == 6
     assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
-    # Reconciled common sample: exactly 745 (or 741) origin dates across all arms
-    assert (primary_df["n_forecasts"].isin([741, 745])).all()
+    # Reconciled common sample: exactly 745 origin dates across all arms
+    assert (primary_df["n_forecasts"] == 745).all()
 
     # Verify no NaN test statistics
     assert primary_df["cw_stat"].notna().all()
@@ -548,7 +548,7 @@ def test_dashboard_clark_west_summary_includes_xgboost():
 
         # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
         xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
-        expected_q = 0.9177 if h == 1 else (0.6755 if h == 5 else 0.2788)
+        expected_q = 0.9446 if h == 1 else (0.1928 if h == 5 else 0.2788)
         assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
 
 

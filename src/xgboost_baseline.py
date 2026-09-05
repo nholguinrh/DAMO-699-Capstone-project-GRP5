@@ -50,17 +50,18 @@ BASE_FEATURES = [
 HORIZONS = [1, 5, 20]
 LAGS = [1, 2, 3, 4, 5, 10, 20]
 MIN_TRAIN = 500
+MIN_FIT_ROWS = 10
 N_FOLDS = 5
 SEED = 42
 
-# Default hyperparameters (tuned via leakage-safe search, Issue #119)
+# Default hyperparameters (tuned via leakage-safe burn-in search, Issue #119)
 MAX_DEPTH = 2
 LEARNING_RATE = 0.01
 N_ESTIMATORS = 600
-SUBSAMPLE = 0.7
-COLSAMPLE_BYTREE = 0.7
-MIN_CHILD_WEIGHT = 5.0
-REG_LAMBDA = 5.0
+SUBSAMPLE = 1.0
+COLSAMPLE_BYTREE = 1.0
+MIN_CHILD_WEIGHT = 1.0
+REG_LAMBDA = 0.5
 REG_ALPHA = 0.0
 
 # Check for XGBoost availability; provide GradientBoostingRegressor fallback
@@ -424,9 +425,7 @@ def run_rolling_cv(
             # the 90% one -- so cal_size (already floored at 20 above) is
             # never reduced to free up more fit rows. The only lever for very
             # small training blocks is how few fit rows are required before
-            # falling back to in-sample residuals instead.
-            MIN_FIT_ROWS = 10
-
+            # falling back to in-sample residuals instead (governed by MIN_FIT_ROWS).
             if fit_end >= MIN_FIT_ROWS:
                 fit_data = train_data.iloc[:fit_end]
                 cal_data = train_data.iloc[fit_end + h:]
@@ -572,6 +571,10 @@ def compute_tree_shap_interpretability(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Train full-sample models for each horizon and compute exact SHAP values.
+
+    Note: Tree SHAP is fitted on the full historical dataset to provide a global
+    retrospective interpretability assessment across all regimes, whereas forecast
+    evaluations in `run_rolling_cv()` are strictly out-of-sample.
 
     Returns
     -------

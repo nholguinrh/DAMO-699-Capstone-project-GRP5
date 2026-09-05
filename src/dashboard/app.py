@@ -126,7 +126,12 @@ uncertainty_interval = st.sidebar.radio(
     "XGBoost Uncertainty Ribbon",
     options=["None", "90%", "95%"],
     horizontal=True,
-    help="Displays 90% or 95% calibrated empirical prediction intervals for XGBoost.",
+    help=(
+        "Split-conformal empirical prediction intervals for XGBoost. Finite-sample validity "
+        "requires exchangeable residuals, which overlapping h-step targets violate; realized "
+        "coverage is 86.8/84.9/84.6% at h=1/5/20 against a 90% nominal target "
+        "(outputs/r3_xgboost_prediction_intervals.csv). Treat as indicative, not guaranteed."
+    ),
 )
 
 
@@ -524,7 +529,7 @@ Statistics Canada API ──┘           ↓
             "Family": "Tree-Based Machine Learning",
             "Target Formulation": "Cumulative Diff Delta_h y",
             "Information Set": "50 causal lag / rolling features",
-            "Key Mechanism / Specification": "Gradient Boosted Trees (600 estimators, depth 2, lr 0.01, subsample 0.7) + Tree SHAP + Conformal PIs",
+            "Key Mechanism / Specification": "Gradient Boosted Trees (600 estimators, depth 2, lr 0.01) + Tree SHAP + Conformal PIs",
         },
     ])
 

@@ -1,0 +1,4 @@
+horizon,pool_size,inner_train_start_idx,inner_train_end_idx,inner_train_rows,inner_val_start_idx,inner_val_end_idx,inner_val_rows,cal_start_idx,cal_end_idx,cal_rows,first_scored_origin_idx,inner_train_start_date,inner_train_end_date,inner_val_start_date,inner_val_end_date,cal_start_date,cal_end_date,first_scored_origin_date
+1,500,0,339,339,340,424,84,425,499,74,500,2010-03-19 00:00:00,2011-07-06 00:00:00,2011-07-08 00:00:00,2011-11-02 00:00:00,2011-11-04 00:00:00,2012-02-15 00:00:00,2012-02-17 00:00:00
+5,500,0,328,328,333,416,83,421,495,74,500,2010-03-19 00:00:00,2011-06-21 00:00:00,2011-06-29 00:00:00,2011-10-21 00:00:00,2011-10-31 00:00:00,2012-02-09 00:00:00,2012-02-17 00:00:00
+20,500,0,291,291,311,388,77,408,480,72,500,2010-03-19 00:00:00,2011-04-29 00:00:00,2011-05-30 00:00:00,2011-09-13 00:00:00,2011-10-12 00:00:00,2012-01-19 00:00:00,2012-02-17 00:00:00

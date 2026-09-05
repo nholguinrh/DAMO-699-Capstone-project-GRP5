@@ -456,6 +456,16 @@ class TestHyperparameterTuningParity:
         assert len(forecasts_df) > 0
         assert len(metrics_df) > 0
 
-
-
-
+    def test_shipped_intervals_within_disclosed_miscoverage_budget(self):
+        """
+        Nominal-90% coverage must not fall below 83% on the shipped artifact (M-3).
+        Finite-sample validity is void under h-step overlap; this bounds empirical damage.
+        """
+        from project_paths import OUTPUTS_DIR
+        iv_path = OUTPUTS_DIR / "r3_xgboost_prediction_intervals.csv"
+        if not iv_path.exists():
+            pytest.skip("outputs/r3_xgboost_prediction_intervals.csv does not exist yet")
+        iv = pd.read_csv(iv_path)
+        assert (iv["empirical_coverage_90"] >= 83.0).all()
+        assert (iv["empirical_coverage_95"] >= 90.0).all()
+        assert (iv["empirical_coverage_95"] > iv["empirical_coverage_90"]).all()

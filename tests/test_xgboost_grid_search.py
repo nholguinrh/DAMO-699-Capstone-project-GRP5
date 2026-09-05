@@ -88,48 +88,49 @@ class TestSearchSpaceConstruction:
 class TestInnerSplitTemporalEmbargo:
     """Verify that inner validation split preserves causal ordering with no leakage."""
 
-    def test_inner_validation_disjoint_from_calibration_and_test(self, synthetic_gold_df):
+    def test_production_split_preserves_embargo(self, synthetic_gold_df):
+        """
+        Capture the partitions the SHIPPED function actually builds and assert the
+        embargo on those -- not on a copy of the arithmetic maintained in the test (H-1).
+        """
         data, feature_cols, target_cols = engineer_tabular_features(
             synthetic_gold_df, lags=[1, 2], horizons=[1, 5],
         )
 
+        rec, partitions = evaluate_inner_split_config(
+            data=data,
+            feature_cols=feature_cols,
+            target_cols=target_cols,
+            config={"max_depth": 2, "learning_rate": 0.1, "n_estimators": 5},
+            horizons=[5],
+            selection_end_index=len(data),
+        )
+        assert len(partitions) == 1
+        p = partitions[0]
         h = 5
-        cal_ratio = 0.15
-        val_ratio = 0.20
-        n_pool = len(data)
 
-        embargo_end = n_pool - h
-        train_data = data.iloc[:embargo_end]
-        n_tr = len(train_data)
+        # 1. Inner train and inner val have causal h-step gap
+        assert p["inner_val_start_idx"] - p["inner_train_end_idx"] >= h, "embargo collapsed"
+        # 2. Inner val and calibration have causal h-step gap
+        assert p["cal_start_idx"] - p["inner_val_end_idx"] >= h, "val/calibration overlap"
+        # 3. Selection window ends before or at first scored origin
+        assert p["first_scored_origin_idx"] >= p["cal_end_idx"], "selection window reaches into scored origins"
 
-        cal_size = max(int(n_tr * cal_ratio), 20)
-        fit_end = n_tr - cal_size - h
-        fit_data = train_data.iloc[:fit_end]
-
-        val_size = max(int(len(fit_data) * val_ratio), 20)
-        inner_train_end = len(fit_data) - val_size - h
-
-        # Assert disjoint partitions
-        inner_train = fit_data.iloc[:inner_train_end]
-        inner_val = fit_data.iloc[inner_train_end + h:]
-        cal_data = train_data.iloc[fit_end + h:]
-
-        # 1. Inner train and inner val have h-step gap
-        idx_inner_train_max = inner_train.index.max()
-        idx_inner_val_min = inner_val.index.min()
-        assert idx_inner_val_min - idx_inner_train_max > h, \
-            f"Expected >{h} gap between inner train and inner val, got {idx_inner_val_min - idx_inner_train_max}"
-
-        # 2. Inner val and cal data have h-step gap
-        idx_inner_val_max = inner_val.index.max()
-        idx_cal_min = cal_data.index.min()
-        assert idx_cal_min - idx_inner_val_max > h, \
-            f"Expected >{h} gap between inner val and cal data, got {idx_cal_min - idx_inner_val_max}"
-
-        # 3. No index intersection across all three partitions
-        assert len(set(inner_train.index).intersection(set(inner_val.index))) == 0
-        assert len(set(inner_val.index).intersection(set(cal_data.index))) == 0
-        assert len(set(inner_train.index).intersection(set(cal_data.index))) == 0
+    def test_undersized_pool_raises_value_error_without_leaky_fallback(self, synthetic_gold_df):
+        """Verify M-1: no silent fallbacks -- an undersized pool raises ValueError."""
+        data, feature_cols, target_cols = engineer_tabular_features(
+            synthetic_gold_df, lags=[1, 2], horizons=[1],
+        )
+        tiny_data = data.iloc[:40]
+        with pytest.raises(ValueError, match="too small for a leakage-safe embargoed inner split"):
+            evaluate_inner_split_config(
+                data=tiny_data,
+                feature_cols=feature_cols,
+                target_cols=target_cols,
+                config={"max_depth": 2, "learning_rate": 0.1, "n_estimators": 5},
+                horizons=[1],
+                selection_end_index=40,
+            )
 
 
 class TestGridSearchExecution:
@@ -140,8 +141,8 @@ class TestGridSearchExecution:
             {"max_depth": 2, "learning_rate": 0.1, "n_estimators": 5, "subsample": 0.8},
             {"max_depth": 3, "learning_rate": 0.1, "n_estimators": 5, "subsample": 0.8},
         ]
-        res1 = run_grid_search(synthetic_gold_df, search_space=mini_space, verbose=False)
-        res2 = run_grid_search(synthetic_gold_df, search_space=mini_space, verbose=False)
+        res1, _ = run_grid_search(synthetic_gold_df, search_space=mini_space, seeds=(42,), verbose=False)
+        res2, _ = run_grid_search(synthetic_gold_df, search_space=mini_space, seeds=(42,), verbose=False)
 
         pd.testing.assert_frame_equal(res1, res2)
 
@@ -168,17 +169,25 @@ class TestGridSearchExecution:
                 "reg_alpha": 0.0,
             },
         ]
-        results_df = run_grid_search(synthetic_gold_df, search_space=mini_space, verbose=False)
+        results_df, partitions_df = run_grid_search(synthetic_gold_df, search_space=mini_space, seeds=(42,), verbose=False)
         out_csv = tmp_path / "test_search.csv"
-        export_search_results(results_df, output_path=out_csv)
+        part_csv = tmp_path / "test_partitions.csv"
+        export_search_results(results_df, partitions_df=partitions_df, output_path=out_csv, partitions_path=part_csv)
 
         assert out_csv.exists()
+        assert part_csv.exists()
         saved_df = pd.read_csv(out_csv)
         assert "rank" in saved_df.columns
         assert "mean_relative_rmse" in saved_df.columns
+        assert "std_relative_rmse" in saved_df.columns
+        assert "n_selection_seeds" in saved_df.columns
         assert "val_improvement_pct" in saved_df.columns
         assert "is_canonical" in saved_df.columns
-        assert saved_df["is_canonical"].sum() == 1
+
+        saved_parts = pd.read_csv(part_csv)
+        assert "inner_train_rows" in saved_parts.columns
+        assert "inner_val_rows" in saved_parts.columns
+        assert "cal_rows" in saved_parts.columns
 
         summary = compare_best_to_canonical(results_df)
         assert "best_config" in summary
