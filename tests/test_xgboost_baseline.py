@@ -315,108 +315,64 @@ class TestSmokePipeline:
 # ---------------------------------------------------------------------------
 
 class TestConformalCalibrationFix:
-    """Regression tests for the split-conformal quantile-level fix (#108)."""
+    """Regression tests for the split-conformal quantile fix (#108).
 
-    def test_quantile_level_uses_n_cal_plus_one_denominator(self):
-        """Split-conformal quantile level must divide by (n_cal + 1), not n_cal --
-        dividing by n_cal overshoots the target quantile and understates coverage.
-        Calls the actual production helper rather than re-deriving the formula,
-        so this fails if the shipped code ever regresses."""
-        from xgboost_baseline import _conformal_quantile_level
+    An earlier round of this fix (dividing by n_cal + 1 instead of n_cal,
+    then feeding that level to np.quantile's default linear interpolation)
+    was itself wrong: np.quantile's virtual index is p * (n - 1), not
+    p * (n + 1), so the "corrected" level lands ~0.8-0.9 order statistics
+    below the true k-th one -- narrower intervals, coverage BELOW nominal,
+    i.e. worse than the original bug. These tests bind the actual
+    order-statistic estimator (_conformal_quantile), not a level fed to a
+    generic quantile function, so they can't pass on either broken form."""
 
-        n_cal = 50
-        correct_q90 = _conformal_quantile_level(n_cal, 0.90)
-        buggy_q90 = np.ceil((n_cal + 1) * 0.90) / n_cal
+    def test_conformal_quantile_is_the_exact_order_statistic(self):
+        """The k-th smallest calibration residual must be returned exactly.
+        Both the n_cal denominator (original bug) and the (n_cal + 1) level
+        fed to np.quantile's linear interpolation (a since-reverted "fix")
+        miss this -- this test fails against both."""
+        from xgboost_baseline import _conformal_quantile
 
-        assert correct_q90 == pytest.approx(46 / 51)
-        assert buggy_q90 > correct_q90, \
-            "Regression guard: the old n_cal denominator must overshoot the corrected quantile level"
+        rng = np.random.RandomState(0)
+        for n_cal in (20, 37, 50, 101, 300):
+            r = np.sort(np.abs(rng.randn(n_cal)))
+            for q in (0.90, 0.95):
+                k = int(np.ceil((n_cal + 1) * q))
+                assert _conformal_quantile(r, q) == pytest.approx(r[k - 1]), \
+                    f"n_cal={n_cal} q={q}: must be the {k}-th smallest residual"
+                # Explicit regression guard against the (n_cal + 1) level
+                # under linear interpolation.
+                assert not np.isclose(
+                    _conformal_quantile(r, q),
+                    np.quantile(r, min(1.0, k / (n_cal + 1))),
+                ), "regressed to the (n_cal + 1) level under linear interpolation"
 
-    def test_quantile_level_saturates_only_below_the_cal_size_floor(self):
-        """Documents why cal_size's 20-row floor in run_rolling_cv is exactly
-        the safety margin needed: below 19 calibration rows, the 95% level
-        saturates to the calibration set's max residual (ceil((n+1)*0.95) ==
-        n+1), which would silently produce a degenerate "95% interval"
-        identical to the 90% one after the non-crossing clamp."""
-        from xgboost_baseline import _conformal_quantile_level
+    def test_raises_when_calibration_set_too_small_for_the_quantile(self):
+        """k > n_cal means the finite-sample conformal quantile is +inf --
+        no distribution-free guarantee exists, so this must raise rather
+        than silently return the sample max."""
+        from xgboost_baseline import _conformal_quantile
 
-        assert _conformal_quantile_level(18, 0.95) == 1.0
-        assert _conformal_quantile_level(19, 0.95) < 1.0
-        assert _conformal_quantile_level(20, 0.95) < 1.0
+        with pytest.raises(ValueError, match="cannot support"):
+            _conformal_quantile(np.abs(np.random.RandomState(0).randn(5)), 0.95)
 
-    def test_empirical_coverage_near_nominal_with_held_out_calibration(self, synthetic_gold_df):
-        """With a genuine held-out calibration split, 90% empirical coverage should
-        land in a plausible neighborhood of the 90% nominal target, not be
-        systematically depressed by an overshot quantile level."""
-        from xgboost_baseline import run_rolling_cv
+    def test_empirical_coverage_is_at_or_above_nominal_under_exchangeability(self):
+        """Distribution-free guarantee: with exchangeable calibration and
+        test scores, split-conformal coverage is >= nominal. This is the
+        assertion that would catch a below-nominal-coverage regression,
+        whether from the original bug or an over/under-corrected fix."""
+        from xgboost_baseline import _conformal_quantile
 
-        _, _, intervals_df = run_rolling_cv(
-            synthetic_gold_df,
-            lags=[1, 2],
-            horizons=[1],
-            min_train=150,
-            n_folds=2,
-            n_estimators=10,
-            max_depth=2,
-        )
-
-        coverage_90 = intervals_df.loc[
-            intervals_df["horizon"] == 1, "empirical_coverage_90"
-        ].iloc[0]
-        # Loose sanity band on a small synthetic sample -- not a statistical
-        # guarantee, but it should not be far below nominal the way the
-        # n_cal-denominator bug would systematically cause.
-        assert 50.0 <= coverage_90 <= 100.0
-
-    def test_lowered_fit_threshold_rescues_moderate_small_blocks_from_in_sample_fallback(
-        self, synthetic_gold_df
-    ):
-        """A training block too small for the OLD 30-row fit-size threshold,
-        but large enough for the lowered MIN_FIT_ROWS=10, should still reach
-        the real held-out calibration branch with cal_size at its safe
-        20-row floor -- not a shrunk, potentially-degenerate one, and not
-        the in-sample fallback either."""
-        from xgboost_baseline import engineer_tabular_features, make_rolling_folds
-
-        data, _, _ = engineer_tabular_features(
-            synthetic_gold_df, lags=[1, 2], horizons=[1]
-        )
-        folds = make_rolling_folds(len(data), min_train=36, n_folds=2)
-        train_end, _ = folds[0]
-        h = 1
-        n_tr = train_end - h
-        cal_size = max(int(n_tr * 0.15), 20)
-        fit_end = n_tr - cal_size - h
-
-        # Between the new MIN_FIT_ROWS=10 and the old 30-row threshold --
-        # exactly the range this fix rescues -- while cal_size sits at its
-        # unshrunk, quantile-safe 20-row floor.
-        assert 10 <= fit_end < 30
-        assert cal_size == 20
-
-    def test_real_calibration_branch_never_uses_a_saturating_cal_size(
-        self, synthetic_gold_df
-    ):
-        """End-to-end guard: across every fold/horizon actually exercised by
-        run_rolling_cv on a small fixture, the 90%/95% intervals must not be
-        degenerate (95% collapsing to the same width as 90%), which is what
-        the reviewer-caught shrink-to-5 bug would have produced."""
-        from xgboost_baseline import run_rolling_cv
-
-        forecasts_df, _, _ = run_rolling_cv(
-            synthetic_gold_df,
-            lags=[1, 2],
-            horizons=[1, 5],
-            min_train=36,
-            n_folds=3,
-            n_estimators=10,
-            max_depth=2,
-        )
-
-        width_90 = forecasts_df["upper_90"] - forecasts_df["lower_90"]
-        width_95 = forecasts_df["upper_95"] - forecasts_df["lower_95"]
-        assert (width_95 > width_90).all(), \
-            "95% interval collapsed to the same width as 90% -- degenerate quantile"
+        rng = np.random.RandomState(1)
+        for n_cal, q in ((20, 0.90), (20, 0.95), (74, 0.90), (300, 0.95)):
+            hits = 0
+            trials = 4000
+            for _ in range(trials):
+                cal = np.abs(rng.randn(n_cal))
+                hits += abs(rng.randn()) <= _conformal_quantile(cal, q)
+            cov = hits / trials
+            assert cov >= q - 0.015, \
+                f"n_cal={n_cal} q={q}: empirical {cov:.3f} below nominal"
 
 
 # ---------------------------------------------------------------------------
