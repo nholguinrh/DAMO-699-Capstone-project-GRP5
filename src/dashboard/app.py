@@ -34,10 +34,12 @@ from data_loader import (
     load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
+    get_conformal_disclosure,
 )
 
 from charts import (
     MODEL_COLUMNS,
+    XGB_DISPLAY_LABEL,
     create_clark_west_chart,
     create_fevd_chart,
     create_forecast_error_distribution,
@@ -118,20 +120,15 @@ selected_models = st.sidebar.multiselect(
         "VAR",
         "VECM",
         "LSTM",
-        "XGBoost",
+        XGB_DISPLAY_LABEL,
     ],
 )
 
 uncertainty_interval = st.sidebar.radio(
-    "XGBoost Uncertainty Ribbon",
+    f"{XGB_DISPLAY_LABEL} Uncertainty Ribbon",
     options=["None", "90%", "95%"],
     horizontal=True,
-    help=(
-        "Split-conformal empirical prediction intervals for XGBoost. Finite-sample validity "
-        "requires exchangeable residuals, which overlapping h-step targets violate; realized "
-        "coverage is 86.8/84.9/84.6% at h=1/5/20 against a 90% nominal target "
-        "(outputs/r3_xgboost_prediction_intervals.csv). Treat as indicative, not guaranteed."
-    ),
+    help=get_conformal_disclosure(),
 )
 
 
@@ -525,7 +522,7 @@ Statistics Canada API ──┘           ↓
             "Key Mechanism / Specification": "32 hidden units, AdamW optimizer, early stopping, sequence temporal memory",
         },
         {
-            "Model": "XGBoost",
+            "Model": XGB_DISPLAY_LABEL,
             "Family": "Tree-Based Machine Learning",
             "Target Formulation": "Cumulative Diff Delta_h y",
             "Information Set": "50 causal lag / rolling features",

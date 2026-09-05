@@ -1,0 +1,10 @@
+{
+  "gold_features.csv": {
+    "path": "data/processed/gold_features.csv",
+    "sha256": "91979adb6c3b71a06bde7f58db6ddadc83b4c2e3ebe8783363e6e8709ce84e82",
+    "size_bytes": 1279042,
+    "row_count": 4268,
+    "start_date": "2010-02-19",
+    "end_date": "2026-06-30"
+  }
+}

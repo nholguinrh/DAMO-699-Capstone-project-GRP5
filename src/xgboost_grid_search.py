@@ -351,7 +351,14 @@ def evaluate_config_across_seeds(
     seed_records: list[dict[str, Any]] = []
     partitions: list[dict[str, Any]] = []
 
-    for s in seeds:
+    # Check for deterministic configuration (subsample=1.0 and colsample_bytree=1.0)
+    sub = float(config.get("subsample", SUBSAMPLE))
+    col = float(config.get("colsample_bytree", COLSAMPLE_BYTREE))
+    is_deterministic = np.isclose(sub, 1.0) and np.isclose(col, 1.0)
+
+    eval_seeds = (seeds[0],) if (is_deterministic and len(seeds) > 0) else seeds
+
+    for s in eval_seeds:
         rec, parts = evaluate_inner_split_config(
             data=data,
             feature_cols=feature_cols,
@@ -368,14 +375,37 @@ def evaluate_config_across_seeds(
             partitions = parts
 
     out = dict(seed_records[0])
-    mean_rel_vals = [r["mean_relative_rmse"] for r in seed_records]
-    mean_val_vals = [r["mean_val_rmse"] for r in seed_records]
 
-    out["mean_relative_rmse"] = round(float(np.mean(mean_rel_vals)), 6)
-    out["std_relative_rmse"] = round(float(np.std(mean_rel_vals, ddof=1)), 6) if len(mean_rel_vals) > 1 else 0.0
-    out["mean_val_rmse"] = round(float(np.mean(mean_val_vals)), 6)
-    out["std_val_rmse"] = round(float(np.std(mean_val_vals, ddof=1)), 6) if len(mean_val_vals) > 1 else 0.0
-    out["val_improvement_pct"] = round(float((1.0 - out["mean_relative_rmse"]) * 100.0), 3)
+    # Average every numeric metric across seeds (R2-2)
+    per_h_keys = [k for k in seed_records[0] if k.startswith(("val_rmse_h", "naive_rmse_h", "rel_rmse_h"))]
+    for k in per_h_keys:
+        if is_deterministic:
+            out[k] = round(float(seed_records[0][k]), 6)
+            out[f"{k}_sd"] = 0.0
+        else:
+            vals = [r[k] for r in seed_records]
+            out[k] = round(float(np.mean(vals)), 6)
+            out[f"{k}_sd"] = round(float(np.std(vals, ddof=1)), 6) if len(vals) > 1 else 0.0
+
+    # Pop individual fit seed and log selection_seeds
+    out.pop("seed", None)
+    out["selection_seeds"] = ",".join(str(s) for s in seeds)
+
+    if is_deterministic:
+        out["mean_relative_rmse"] = round(float(seed_records[0]["mean_relative_rmse"]), 6)
+        out["std_relative_rmse"] = 0.0
+        out["mean_val_rmse"] = round(float(seed_records[0]["mean_val_rmse"]), 6)
+        out["std_val_rmse"] = 0.0
+        out["val_improvement_pct"] = round(float((1.0 - out["mean_relative_rmse"]) * 100.0), 3)
+    else:
+        mean_rel_vals = [r["mean_relative_rmse"] for r in seed_records]
+        mean_val_vals = [r["mean_val_rmse"] for r in seed_records]
+        out["mean_relative_rmse"] = round(float(np.mean(mean_rel_vals)), 6)
+        out["std_relative_rmse"] = round(float(np.std(mean_rel_vals, ddof=1)), 6) if len(mean_rel_vals) > 1 else 0.0
+        out["mean_val_rmse"] = round(float(np.mean(mean_val_vals)), 6)
+        out["std_val_rmse"] = round(float(np.std(mean_val_vals, ddof=1)), 6) if len(mean_val_vals) > 1 else 0.0
+        out["val_improvement_pct"] = round(float((1.0 - out["mean_relative_rmse"]) * 100.0), 3)
+
     out["n_selection_seeds"] = len(seeds)
 
     return out, partitions
@@ -441,10 +471,16 @@ def run_grid_search(
 
     results_df = pd.DataFrame(records)
 
-    # Rank configurations by mean_relative_rmse, breaking ties toward parsimony
+    # Rank on seed-mean, then collapse configurations within 1 sd of leader into indifference band (R2-6)
+    results_df = results_df.sort_values("mean_relative_rmse").reset_index(drop=True)
+    band = float(results_df["std_relative_rmse"].replace(0.0, np.nan).median())
+    leader = float(results_df["mean_relative_rmse"].iloc[0])
+    results_df["within_1sd_of_leader"] = (
+        results_df["mean_relative_rmse"] <= leader + (band if np.isfinite(band) else 0.0)
+    )
     results_df = results_df.sort_values(
-        ["mean_relative_rmse", "max_depth", "n_estimators"],
-        ascending=[True, True, True],
+        ["within_1sd_of_leader", "n_estimators", "max_depth", "mean_relative_rmse"],
+        ascending=[False, True, True, True],
     ).reset_index(drop=True)
     results_df["rank"] = range(1, len(results_df) + 1)
 

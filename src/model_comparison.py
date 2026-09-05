@@ -68,7 +68,7 @@ from dieboldmariano import (
 from statsmodels.stats.multitest import multipletests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project_paths import OUTPUTS_DIR as OUT_DIR  # noqa: E402
+from project_paths import OUTPUTS_DIR as OUT_DIR, PROCESSED_DIR, PROJECT_ROOT, write_data_manifest  # noqa: E402
 
 ALPHA = 0.05
 HORIZONS = [1, 5, 20]
@@ -1066,6 +1066,11 @@ def export_all_model_comparisons(output_dir: Path | None = None) -> None:
 
     regime_df = evaluate_regime_segmentation(output_path=out / "r3_regime_segmented_metrics.csv")
     logger.info("Saved Regime Segmentation metrics (%d rows) to %s", len(regime_df), out)
+
+    gold_csv = PROCESSED_DIR / "gold_features.csv"
+    if gold_csv.exists():
+        write_data_manifest([gold_csv], out / "data_manifest.json")
+        logger.info("Saved input data manifest to %s", out / "data_manifest.json")
 
 
 if __name__ == "__main__":

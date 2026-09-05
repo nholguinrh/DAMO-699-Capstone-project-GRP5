@@ -18,22 +18,43 @@ import pandas as pd
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from xgboost_baseline import (
-    HORIZONS,
-    LAGS,
-    SEED,
-    engineer_tabular_features,
-)
-from xgboost_grid_search import (
-    CANONICAL_CONFIG,
-    compare_best_to_canonical,
-    evaluate_inner_split_config,
-    export_search_results,
-    generate_search_space,
-    run_grid_search,
-)
+try:
+    from src.xgboost_baseline import (
+        HORIZONS,
+        LAGS,
+        SEED,
+        engineer_tabular_features,
+    )
+    from src.xgboost_grid_search import (
+        CANONICAL_CONFIG,
+        OUTPUTS_DIR,
+        compare_best_to_canonical,
+        evaluate_inner_split_config,
+        export_search_results,
+        generate_search_space,
+        run_grid_search,
+    )
+except ImportError:
+    from xgboost_baseline import (  # type: ignore
+        HORIZONS,
+        LAGS,
+        SEED,
+        engineer_tabular_features,
+    )
+    from xgboost_grid_search import (  # type: ignore
+        CANONICAL_CONFIG,
+        OUTPUTS_DIR,
+        compare_best_to_canonical,
+        evaluate_inner_split_config,
+        export_search_results,
+        generate_search_space,
+        run_grid_search,
+    )
 
 
 @pytest.fixture
@@ -183,6 +204,7 @@ class TestGridSearchExecution:
         assert "n_selection_seeds" in saved_df.columns
         assert "val_improvement_pct" in saved_df.columns
         assert "is_canonical" in saved_df.columns
+        assert saved_df["is_canonical"].sum() == 1
 
         saved_parts = pd.read_csv(part_csv)
         assert "inner_train_rows" in saved_parts.columns
@@ -193,3 +215,14 @@ class TestGridSearchExecution:
         assert "best_config" in summary
         assert "canonical_config" in summary
         assert "is_new_best" in summary
+
+    def test_search_csv_rows_reconcile_internally(self):
+        """Every published row's per-horizon ratios must average to its published
+        mean_relative_rmse. A mismatch means the row mixes single-seed detail with
+        multi-seed aggregates, and the published ranking cannot be re-derived."""
+        csv_path = OUTPUTS_DIR / "r3_xgboost_hyperparameter_search.csv"
+        if not csv_path.exists():
+            pytest.skip("r3_xgboost_hyperparameter_search.csv not present yet.")
+        d = pd.read_csv(csv_path)
+        per_h = d[[f"rel_rmse_h{h}" for h in (1, 5, 20)]].mean(axis=1)
+        assert np.allclose(per_h, d["mean_relative_rmse"], atol=1e-4)

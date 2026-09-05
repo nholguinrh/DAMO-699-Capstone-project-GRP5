@@ -546,10 +546,22 @@ def test_dashboard_clark_west_summary_includes_xgboost():
         assert "XGBoost (Tuned)" in models, f"XGBoost (Tuned) must be directly present in Clark-West summary for h={h}"
         assert len(cw) == 5, f"Each horizon must contain 5 models under unified battery, got {len(cw)}"
 
-        # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
+        # Verify XGBoost's q-value obeys the unified m=15 BH contract, rather than
+        # pinning a literal that has to be rewritten on every regeneration (and so
+        # can never fail for the reason it exists).
         xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
-        expected_q = 0.9446 if h == 1 else (0.1928 if h == 5 else 0.2788)
-        assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
+        p, q = xgb_row["cw_p_value"], xgb_row["cw_p_adj_horizon"]
+        assert q >= p - 1e-12, "BH adjustment must be non-decreasing in p"
+        assert q <= 1.0 + 1e-12
+        # Horizon-stratified BH over m=5 models: q_i <= p_i * m / rank_i (by step-up minimum accumulation)
+        ranks = cw["cw_p_value"].rank(method="min")
+        r = float(ranks[cw["model_key"] == "xgboost"].iloc[0])
+        assert q <= p * len(cw) / r + 1e-4, "BH q-value cannot exceed raw step-up multiple"
+        from statsmodels.stats.multitest import multipletests
+        _, expected_qs, _, _ = multipletests(cw["cw_p_value"], method="fdr_bh")
+        mask = (cw["model_key"] == "xgboost").values
+        expected_q = float(expected_qs[mask][0])
+        assert np.isclose(q, expected_q, atol=1e-3)
 
 
 def test_clark_west_r2_oos_mathematical_consistency():

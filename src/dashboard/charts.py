@@ -2,13 +2,15 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+XGB_DISPLAY_LABEL = "XGBoost (Tuned)"
+
 MODEL_COLUMNS = {
     "Naïve Random Walk": "naive",
     "ARIMA": "arima_aic",
     "VAR": "var_aic",
     "VECM": "vecm",
     "LSTM": "lstm",
-    "XGBoost": "xgboost",
+    XGB_DISPLAY_LABEL: "xgboost",
 }
 
 
@@ -34,7 +36,7 @@ def create_forecast_vs_actual_chart(
     # Optional XGBoost Prediction Interval Ribbon
     if (
         uncertainty_interval in ["90%", "95%"]
-        and "XGBoost" in selected_models
+        and any(m in selected_models for m in [XGB_DISPLAY_LABEL, "XGBoost"])
     ):
         l_col = "lower_90" if uncertainty_interval == "90%" else "lower_95"
         u_col = "upper_90" if uncertainty_interval == "90%" else "upper_95"
@@ -57,7 +59,7 @@ def create_forecast_vs_actual_chart(
                     line=dict(width=0),
                     fill="tonexty",
                     fillcolor="rgba(255, 127, 14, 0.20)",
-                    name=f"XGBoost {uncertainty_interval} Band",
+                    name=f"{XGB_DISPLAY_LABEL} {uncertainty_interval} Band",
                 )
             )
 
@@ -72,7 +74,7 @@ def create_forecast_vs_actual_chart(
     )
 
     for model_name in selected_models:
-        column = MODEL_COLUMNS.get(model_name)
+        column = MODEL_COLUMNS.get(model_name) or ("xgboost" if model_name == "XGBoost" else None)
 
         if column is None or column not in plot_df.columns:
             continue

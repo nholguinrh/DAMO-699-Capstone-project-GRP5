@@ -140,7 +140,7 @@ At the 1-day horizon ($h=1$), all five models fail to reject the null hypothesis
 Rather than reflecting a failure of statistical or neural modeling, this finding is directly predicted by capital market theory:
 1. **Efficient Market Hypothesis (Fama, 1970; Campbell, Lo, & MacKinlay, 1997)**: Government bond markets incorporate public macro-financial information rapidly. Daily fluctuations in sovereign yield spreads behave as a **Martingale Difference Sequence** ($\mathbb{E}[\Delta s_{t+1} \mid \mathcal{I}_t] = 0$).
 2. **Horizon-Dependent Dynamics**: While daily innovations are dominated by unforecastable news arrivals, medium-term structure emerges at longer horizons:
-   - At $h=5$ days, the **LSTM network** ($CW = 1.577, p_{\text{raw}} = 0.0574, q_{\text{horizon}} = 0.1928$) and **XGBoost (Tuned)** ($CW = 1.425, p_{\text{raw}} = 0.0771, q_{\text{horizon}} = 0.1928$) both capture short-term nonlinear momentum.
+   - At $h=5$ days, the **LSTM network** ($CW = 1.577, p_{\text{raw}} = 0.0574, q_{\text{horizon}} = 0.1928$) and **XGBoost (Tuned)** ($CW = 1.425, p_{\text{raw}} = 0.0771, q_{\text{horizon}} = 0.1928$) show the largest, though non-significant, adjusted MSPE reductions.
    - At $h=20$ days, the **VECM framework** captures cointegrating equilibrium adjustments across Canadian and U.S. yields, producing a raw unadjusted reduction in MSPE ($CW = 1.985, p_{\text{raw}} = 0.0236, q_{\text{horizon}} = 0.1180$).
 
 ### 4.3 Leakage-Safe Hyperparameter Tuning for XGBoost Benchmark (Issue #119)
@@ -156,9 +156,24 @@ To achieve parity with `LSTM (Tuned)` (Issue #90) and eliminate benchmark bias s
    - `max_depth = 2` (shallow trees suppress variance on noisy differenced financial series)
    - `learning_rate = 0.01` (conservative gradient shrinkage)
    - `n_estimators = 600`
-   - `subsample = 1.0` & `colsample_bytree = 1.0`
-   - `min_child_weight = 1.0` & `reg_lambda = 0.5`
-5. **Realized OOS Performance**: On the canonical $N=745$ common sample, `XGBoost (Tuned)` captures short-term momentum at $h=5$ ($CW = +1.425, p_{\text{raw}} = 0.0771, q_{\text{horizon}} = 0.1928, R^2_{OOS,\text{adj}} = +3.50\%$) and moderate multi-step structure at $h=20$ ($CW = +0.875, p_{\text{raw}} = 0.1908, R^2_{OOS,\text{adj}} = +2.90\%$).
+   - `subsample = 1.0` & `colsample_bytree = 1.0` (no bagging)
+   - `min_child_weight = 1.0` & `reg_lambda = 0.5` (weakest L2 tier in the space)
+
+   *Selection-power caveat*: The leakage-safe burn-in block yields only 77–84 validation observations (2011-05 to 2011-11), a single low-volatility regime. The rank-1 configuration leads rank 2 by $7.3\times 10^{-4}$ against a per-seed $\sigma$ of $6.1\times 10^{-3}$, so the ordering inside the leading band is not sharply identified; under a 1-sd indifference rule, the frozen specification should be read as a parsimonious representative of the indifference set, not as a sharp global optimum.
+
+   *Regularization reversal*: The winning regularization tier is sensitive to the selection window. On a (leaky) pre-2023 pool, the most-regularized tier (`subsample = 0.7`, `min_child_weight = 5.0`, `reg_lambda = 5.0`) dominated across seeds, whereas on the leakage-safe 2010–2012 burn-in block, the least-regularized tier wins and the former falls to rank 6. With ~84 validation observations, the search cannot reliably distinguish regularization regimes, which directly aligns with item 5: no configuration in the space carries out-of-sample signal.
+5. **Realized OOS Performance — Tuning Yields No Out-of-Sample Gain**: Holding the data vintage fixed ($N = 3{,}728$ rolling origins), the leakage-safe tuned specification is statistically indistinguishable from the untuned Issue #101 defaults:
+
+   | $h$ | RMSE (untuned defaults) | RMSE (tuned) | vs. Naïve (untuned) | vs. Naïve (tuned) | Δ from tuning |
+   |---|---|---|---|---|---|
+   | 1 | 0.029672 | 0.029690 | $-2.94\%$ | $-3.00\%$ | $-0.06\text{ pp (worse)}$ |
+   | 5 | 0.065164 | 0.064930 | $-3.32\%$ | $-2.95\%$ | $+0.37\text{ pp (better)}$ |
+   | 20 | 0.129038 | 0.129240 | $-2.31\%$ | $-2.46\%$ | $-0.16\text{ pp (worse)}$ |
+   | **mean** | | | **$-2.857\%$** | **$-2.805\%$** | **$+0.052\text{ pp (wash)}$** |
+
+   Tuning is marginally worse at $h \in \{1, 20\}$ and marginally better at $h=5$; the 3-horizon mean improvement changes by $+0.05$ pp. **This is the substantive econometric result of Issue #119**, and it is consistent with §4.2: if daily sovereign yield spread changes behave as a martingale difference sequence, no reweighting of a gradient-boosted ensemble over the same causal information set can extract forecastable structure, and hyperparameter search cannot manufacture it.
+
+   For transparency: an earlier revision reported a $4.5\%$ $h=1$ MSPE reduction from tuning. That figure was produced by a selection window that overlapped $76\%$ of the scored forecast origins; it was selection bias, not genuine predictive signal, and it vanished once the window was re-scoped strictly to the pre-evaluation burn-in block. On the canonical $N=745$ sample, the tuned $R^2_{OOS}$ at $h=1$ is $-9.03\%$ (unadjusted) / $-9.27\%$ (adjusted), essentially where the untuned benchmark stood.
 
 ---
 

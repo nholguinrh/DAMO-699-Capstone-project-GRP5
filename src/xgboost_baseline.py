@@ -23,14 +23,20 @@ import numpy as np
 import pandas as pd
 import shap
 
-# Ensure src directory is in sys.path
+# Ensure project root and src directory are in sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from gold_feature_pipeline import build_gold_features  # noqa: E402
-from project_paths import PROCESSED_DIR  # noqa: E402
+try:
+    from src.gold_feature_pipeline import build_gold_features  # noqa: E402
+    from src.project_paths import PROCESSED_DIR, write_data_manifest  # noqa: E402
+except ImportError:
+    from gold_feature_pipeline import build_gold_features  # type: ignore # noqa: E402
+    from project_paths import PROCESSED_DIR, write_data_manifest  # type: ignore # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -671,6 +677,9 @@ def run_pipeline(
         shap_values_df.to_csv(
             out_dir / "r3_xgboost_shap_values.csv", index=False
         )
+        gold_csv = PROCESSED_DIR / "gold_features.csv"
+        if gold_csv.exists():
+            write_data_manifest([gold_csv], out_dir / "data_manifest.json")
         logger.info("Saved all XGBoost artifacts to %s", out_dir)
 
     return {
