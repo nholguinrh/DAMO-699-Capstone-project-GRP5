@@ -17,11 +17,14 @@ Two sources are combined:
 
 Usage:
     pip install requests beautifulsoup4 pdfplumber --break-system-packages
-    python build_cpi_release_dates.py
+    python build_cpi_release_dates.py [--target-end YYYY-MM-DD]
 
 Output:
     config/cpi_release_dates.csv  with columns: reference_month, release_date
-    Covers every month from 2009-01 through 2026-06.
+    Covers every month from 2009-01 through --target-end (default: TARGET_END,
+    currently 2026-06 -- see Issue #110). The scheduled GitHub Actions refresh
+    always passes an explicit --target-end computed at run time, so it keeps
+    extending the mapping every month without needing this default bumped.
 """
 
 from __future__ import annotations
@@ -42,6 +45,11 @@ except ImportError:
 START_YEAR = 2009
 END_YEAR = 2026
 TARGET_START = datetime(2009, 1, 1)
+# Local/manual-run default only when --target-end is omitted (Issue #110).
+# .github/workflows/refresh-cpi-dates.yml always passes an explicit
+# --target-end computed at run time (the current month), so this fixed date
+# does not need bumping for the scheduled refresh to keep working -- only a
+# local invocation with no flag falls back to it.
 TARGET_END = datetime(2026, 6, 1)
 
 # This script lives in src/. config/ is a sibling of src/.

@@ -22,8 +22,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 pdfplumber
 
+      - name: Compute target-end
+        id: target_end
+        # Issue #110: build_cpi_release_dates.py's own TARGET_END default is a
+        # fixed constant (last bumped for this project's timeline) -- calling
+        # the script with no arguments, as this job used to, never advances
+        # past it, so the mapping stops growing once the ingestion window
+        # catches up to that date. Compute the current month here instead, so
+        # this workflow keeps itself current with zero manual maintenance.
+        run: echo "value=$(date -u +%Y-%m-01)" >> "$GITHUB_OUTPUT"
+
       - name: Run refresh script
-        run: python src/build_cpi_release_dates.py
+        run: python src/build_cpi_release_dates.py --target-end "${{ steps.target_end.outputs.value }}"
 
       - name: Open PR if the mapping changed
         uses: peter-evans/create-pull-request@v6
@@ -32,7 +42,8 @@ jobs:
           title: "Monthly CPI release-date refresh"
           body: |
             Automated monthly refresh of `config/cpi_release_dates.csv`
-            from Statistics Canada's official release calendars.
+            from Statistics Canada's official release calendars, mapped
+            through ${{ steps.target_end.outputs.value }}.
 
             Please review the diff before merging -- this only updates
             reference-month-to-release-date mappings, no pipeline logic.
