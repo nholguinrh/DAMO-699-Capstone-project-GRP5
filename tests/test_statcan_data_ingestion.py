@@ -124,19 +124,25 @@ class TestRebuildArchiveFromRawCache:
             ["2009-01-01", "2009-02-01", "2009-03-01"], [113.0, 113.8, 114.0]
         )))
         newer.write_text(json.dumps(_raw_json(
-            ["2009-02-01", "2009-03-01", "2009-04-01"], [113.8, 114.0, 113.9]
+            ["2009-02-01", "2009-03-01", "2009-04-01"], [999.9, 114.0, 113.9]
         )))
-        # mtime ordering matters (rebuild sorts by mtime, oldest first)
+        # Ordering must come from the filename's embedded timestamp, not
+        # mtime -- set mtimes backwards (newer file "older" on disk) to
+        # prove a copy/checkout that resets mtimes can't silently reorder
+        # pulls and let the older pull's values win on overlap.
         import os
-        import time
-        os.utime(older, (time.time() - 100, time.time() - 100))
-        os.utime(newer, (time.time(), time.time()))
+        os.utime(newer, (1_000_000_000, 1_000_000_000))
+        os.utime(older, (2_000_000_000, 2_000_000_000))
 
         rebuilt = sc.rebuild_archive_from_raw_cache()
 
         assert list(rebuilt["reference_month"].dt.strftime("%Y-%m-%d")) == [
             "2009-01-01", "2009-02-01", "2009-03-01", "2009-04-01",
         ]
+        # The newer pull's (filename-timestamp-wise) value must win on
+        # overlap, despite its mtime being set older above.
+        overlap = rebuilt.set_index("reference_month")["cpi_all_items"]
+        assert overlap.loc[pd.Timestamp("2009-02-01")] == pytest.approx(999.9)
         # Persisted, not just returned
         assert sc.ARCHIVE_FILE.exists()
 
@@ -191,3 +197,77 @@ class TestRunUsesArchive:
 
         assert "2009-01-01" in result["reference_month"].dt.strftime("%Y-%m-%d").tolist()
         assert len(result) == 3
+
+    def test_explicit_cache_file_does_not_persist_to_shared_archive(
+        self, tmp_path, monkeypatch
+    ):
+        """--cache-file points at one specific historical snapshot for manual
+        testing/debugging, not a genuine new pull -- it must not silently
+        overwrite the shared, git-tracked archive with whatever that old
+        file happens to contain."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        archive_file = tmp_path / "archive.csv"
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
+        monkeypatch.setattr(sc, "PROCESSED_FILE", tmp_path / "statcan_cpi.csv")
+
+        sc.save_archive(_cpi_df(["2009-01-01"], [113.0]))
+
+        cache_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260201_000000.json"
+        cache_file.write_text(json.dumps(_raw_json(["2009-01-01"], [999.9])))
+
+        release_df = pd.DataFrame({
+            "reference_month": ["2009-01-01"],
+            "release_date": ["2009-02-20"],
+        })
+        monkeypatch.setattr(sc, "load_release_date_mapping", lambda: (
+            release_df.assign(
+                reference_month=pd.to_datetime(release_df["reference_month"]),
+                release_date=pd.to_datetime(release_df["release_date"]),
+            )
+        ))
+
+        sc.run(
+            use_cache=True,
+            cache_file=cache_file,
+            start_date="2009-01-01",
+            end_date="2009-01-31",
+        )
+
+        untouched = sc.load_archive()
+        assert untouched.iloc[0]["cpi_all_items"] == pytest.approx(113.0), \
+            "The stale --cache-file pull's value must not have overwritten the archive"
+
+    def test_archive_not_saved_when_validation_fails_downstream(
+        self, tmp_path, monkeypatch
+    ):
+        """A run that fails after the archive merge (e.g. cpi_release_dates.csv
+        doesn't cover a newly-pulled month yet) must not leave the shared
+        archive file created/mutated -- only a fully-validated run persists."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        archive_file = tmp_path / "archive.csv"
+        monkeypatch.setattr(sc, "STATCAN_RAW_DIR", raw_dir)
+        monkeypatch.setattr(sc, "ARCHIVE_FILE", archive_file)
+
+        cache_file = raw_dir / f"cpi_{sc.VECTOR_ID}_20260201_000000.json"
+        cache_file.write_text(json.dumps(_raw_json(["2009-01-01"], [113.0])))
+
+        # No release-date mapping at all for the pulled month -> validation
+        # must raise inside align_to_release_dates/validate_dataframe.
+        monkeypatch.setattr(sc, "load_release_date_mapping", lambda: pd.DataFrame(
+            {"reference_month": pd.Series(dtype="datetime64[ns]"),
+             "release_date": pd.Series(dtype="datetime64[ns]")}
+        ))
+
+        with pytest.raises(ValueError):
+            sc.run(
+                use_cache=True,
+                cache_file=cache_file,
+                start_date="2009-01-01",
+                end_date="2009-01-31",
+            )
+
+        assert not archive_file.exists(), \
+            "A failed run must not create/persist the shared archive file"

@@ -237,21 +237,26 @@ def extract_observations(
 # 6. Find cached raw JSON
 # ---------------------------------------------------------
 
+def _sorted_cached_raw_files() -> list[Path]:
+    """
+    Every cached raw JSON pull, oldest to newest.
+
+    Sorts by the sortable ``%Y%m%d_%H%M%S`` timestamp embedded in each
+    filename (``cpi_{VECTOR_ID}_<timestamp>.json``) rather than filesystem
+    mtime -- mtimes reset whenever these files are copied, zipped, or
+    checked out (they're gitignored, so that's the normal way to move them
+    between machines), which would silently reorder pulls and let an older
+    pull's values win over a newer one's in ``merge_into_archive``.
+    """
+    return sorted(STATCAN_RAW_DIR.glob(f"cpi_{VECTOR_ID}_*.json"), key=lambda p: p.name)
+
+
 def find_latest_cached_json() -> Path:
     """
-    Find the most recently modified Statistics Canada CPI
-    raw JSON file.
+    Find the most recently pulled Statistics Canada CPI raw JSON file.
     """
 
-    cached_files = sorted(
-        STATCAN_RAW_DIR.glob(
-            f"cpi_{VECTOR_ID}_*.json"
-        ),
-        key=lambda file_path: (
-            file_path.stat().st_mtime
-        ),
-        reverse=True,
-    )
+    cached_files = _sorted_cached_raw_files()
 
     if not cached_files:
         raise FileNotFoundError(
@@ -259,7 +264,7 @@ def find_latest_cached_json() -> Path:
             f"was found in {STATCAN_RAW_DIR}"
         )
 
-    latest_file = cached_files[0]
+    latest_file = cached_files[-1]
 
     print(
         "Using cached Statistics Canada JSON:"
@@ -421,7 +426,15 @@ def merge_into_archive(
 
 
 def save_archive(archive_df: pd.DataFrame) -> Path:
-    """Persist the archive to ``ARCHIVE_FILE`` (git-tracked, unlike ``data/``)."""
+    """
+    Persist the archive to ``ARCHIVE_FILE`` (git-tracked, unlike ``data/``).
+
+    Not safe against two concurrent runs racing this read-modify-write --
+    each would merge into the same starting snapshot and whichever save
+    lands last would win, silently dropping the other's observations.
+    Accepted for now: this pipeline runs manually or from a single
+    monthly-cadence job, not a concurrent service.
+    """
     archive_df[ARCHIVE_COLUMNS].to_csv(ARCHIVE_FILE, index=False)
     return ARCHIVE_FILE
 
@@ -433,10 +446,7 @@ def rebuild_archive_from_raw_cache() -> pd.DataFrame:
     overlap. Used to seed/recover the archive from raw pulls that predate
     this fix rather than from a single day's ~210-month window.
     """
-    cached_files = sorted(
-        STATCAN_RAW_DIR.glob(f"cpi_{VECTOR_ID}_*.json"),
-        key=lambda file_path: file_path.stat().st_mtime,
-    )
+    cached_files = _sorted_cached_raw_files()
 
     if not cached_files:
         raise FileNotFoundError(
@@ -912,6 +922,8 @@ def run(
     print(f"Window: {start} to {end}")
     print("=" * 60)
 
+    explicit_cache_file = cache_file is not None
+
     if use_cache:
 
         if cache_file is None:
@@ -932,10 +944,14 @@ def run(
     pull_df = create_cpi_dataframe(data)
 
     # Issue #109: this pull only covers StatCan's fixed ~210-month rolling
-    # window, so merge it into the persisted archive rather than trusting it
-    # alone -- that preserves reference months this pull doesn't cover.
+    # window, so merge it into the archive rather than trusting it alone --
+    # that preserves reference months this pull doesn't cover. An explicit
+    # --cache-file points at one specific historical snapshot for manual
+    # testing/debugging, not a genuine new pull, so it's merged in-memory
+    # for this run only and never persisted back to the shared, git-tracked
+    # archive -- otherwise a deliberately old file could silently overwrite
+    # newer archived values for whatever months it overlaps.
     archive_df = merge_into_archive(load_archive(), pull_df)
-    save_archive(archive_df)
 
     cpi_df = clamp_to_range(archive_df, "reference_month", start, end)
 
@@ -949,6 +965,12 @@ def run(
     validate_dataframe(cpi_df)
 
     display_summary(cpi_df)
+
+    # Persist the archive only once the pull has fully validated -- a run
+    # that fails downstream (e.g. cpi_release_dates.csv doesn't cover a
+    # newly-pulled month yet) must not leave the shared archive mutated.
+    if not explicit_cache_file:
+        save_archive(archive_df)
 
     save_processed_data(cpi_df)
 
