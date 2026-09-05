@@ -40,7 +40,9 @@ from data_loader import (
     load_shap_summary,
     load_xgboost_shap_summary,
     min_covered_origins,
+    origin_window_label,
     window_model_coverage,
+    window_origin_sets,
 )
 
 from charts import (
@@ -171,8 +173,6 @@ else:
     filtered_forecast_df = filter_by_origin_window(
         forecast_df, _range_start, _range_end
     )
-
-_window_label = f"{_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}"
 
 
 
@@ -752,6 +752,11 @@ with tab_performance:
             f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
             "Widen the date range in the sidebar."
         )
+    elif not selected_models:
+        st.info(
+            "No models selected. Choose at least one model under "
+            "'Models to display' in the sidebar to render this chart."
+        )
     else:
         _coverage = window_model_coverage(horizon_window_df, MODEL_COLUMNS)
         _covered_models = set(
@@ -774,7 +779,7 @@ with tab_performance:
             uncertainty_interval=(
                 uncertainty_interval if "XGBoost" in _plot_models else "None"
             ),
-            window_label=_window_label,
+            window_label=origin_window_label(horizon_window_df),
         )
 
         st.plotly_chart(
@@ -782,10 +787,13 @@ with tab_performance:
             use_container_width=True,
         )
 
+        _last_origin = horizon_window_df["origin_date"].max()
         st.caption(
-            f"{len(horizon_window_df)} forecast origin(s) shown at the "
-            f"{horizon}-day horizon; realized outcomes plotted extend "
-            f"{horizon} trading day(s) beyond {_range_end:%Y-%m-%d}."
+            f"{horizon_window_df['origin_date'].nunique()} forecast "
+            f"origin(s) shown at the {horizon}-day horizon. Requested "
+            f"window {_range_start:%Y-%m-%d} – {_range_end:%Y-%m-%d}; last "
+            f"origin in range {_last_origin:%Y-%m-%d}, whose realized "
+            f"outcome falls {horizon} trading day(s) later."
         )
 
     if regime_metrics_df is not None:
@@ -973,6 +981,12 @@ with tab_errors:
             f"{_range_end:%Y-%m-%d} at the {horizon}-day horizon. "
             "Widen the date range in the sidebar."
         )
+    elif not selected_models:
+        st.info(
+            "No models selected. Choose at least one model under "
+            "'Models to display' in the sidebar to render the error "
+            "distribution."
+        )
     else:
         # Scoped to "Models to display" so this tab's disclosures and gate
         # match what's actually plotted below, consistent with Tab 3.
@@ -995,13 +1009,21 @@ with tab_errors:
                 "error."
             )
 
-        if not _present.empty and _present["n_origins"].nunique() > 1:
+        # Equal per-model counts are not sufficient to establish a paired
+        # comparison: two models can cover the same number of origins over
+        # different subsets (e.g. each with one interior gap at a different
+        # date). Compare the origin sets themselves, not just their sizes.
+        _origin_sets = window_origin_sets(horizon_window_df, _selected_columns)
+        _present_sets = {m: s for m, s in _origin_sets.items() if s}
+        if len(set(_present_sets.values())) > 1:
             st.warning(
-                "Models do not share the same number of forecast origins "
-                f"in this window ({_present.set_index('model')['n_origins'].to_dict()}). "
+                "Models are not evaluated on an identical set of forecast "
+                "origins in this window "
+                f"({_present.set_index('model')['n_origins'].to_dict()}). "
                 "Comparing these distributions is **not a paired "
-                "comparison** -- interpret differences in level and "
-                "spread with caution."
+                "comparison** -- differences in level and spread may "
+                "partly reflect different sampling windows, not forecast "
+                "skill."
             )
 
         _min_n = min_covered_origins(_coverage)
@@ -1020,7 +1042,7 @@ with tab_errors:
                 horizon=horizon,
                 chart_type=error_chart_type,
                 selected_models=selected_models,
-                window_label=_window_label,
+                window_label=origin_window_label(horizon_window_df),
             )
 
             st.plotly_chart(

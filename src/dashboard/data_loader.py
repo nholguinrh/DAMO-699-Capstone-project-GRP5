@@ -313,19 +313,38 @@ def window_model_coverage(
     df: pd.DataFrame,
     model_columns: dict[str, str],
 ) -> pd.DataFrame:
-    """Per-model non-null forecast counts within an already-filtered frame.
+    """Per-model *paired* forecast counts within an already-filtered frame.
+
+    Counts rows where both ``actual`` and the model column are non-null --
+    i.e. exactly the rows ``create_forecast_error_distribution`` retains
+    after its own ``dropna(subset=["actual", column])`` -- so the disclosed
+    ``n`` and the sample-size gate can never overstate what is actually
+    plotted (a plain per-column ``notna()`` count would, whenever ``actual``
+    itself has gaps a model column doesn't).
 
     Used to disclose which models have zero coverage in a user-selected
     origin window (e.g. XGBoost's later common-sample start date) and
     whether the remaining models share a common origin count -- i.e.
     whether a cross-model comparison in that window is still paired.
+
+    Always returns a frame carrying the ``model`` / ``n_origins`` columns,
+    including when ``model_columns`` is empty or none of its columns exist
+    in ``df`` (e.g. the user clears every chip from a "Models to display"
+    multiselect): callers index those columns unconditionally, and a bare
+    ``pd.DataFrame([])`` from an empty list comprehension would instead be
+    a (0, 0) frame with no columns at all, raising ``KeyError`` downstream.
     """
-    return pd.DataFrame(
-        [
-            {"model": name, "n_origins": int(df[col].notna().sum())}
-            for name, col in model_columns.items()
-            if col in df.columns
-        ]
+    pair_cols = ["actual"] if "actual" in df.columns else []
+    rows = [
+        {
+            "model": name,
+            "n_origins": int(df[pair_cols + [col]].notna().all(axis=1).sum()),
+        }
+        for name, col in model_columns.items()
+        if col in df.columns
+    ]
+    return pd.DataFrame(rows, columns=["model", "n_origins"]).astype(
+        {"model": "object", "n_origins": "int64"}
     )
 
 
@@ -340,8 +359,45 @@ def min_covered_origins(coverage_df: pd.DataFrame) -> int:
     one -- taking the max here would let one well-covered model wave
     through a box built from another plotted model's much smaller sample.
     """
+    if "n_origins" not in coverage_df.columns:
+        return 0
     present = coverage_df.loc[coverage_df["n_origins"] > 0, "n_origins"]
     return int(present.min()) if not present.empty else 0
+
+
+def window_origin_sets(
+    df: pd.DataFrame,
+    model_columns: dict[str, str],
+) -> dict[str, frozenset]:
+    """Per-model set of origin dates carrying a usable (paired) forecast.
+
+    Cardinality equality is not sufficient to establish that a cross-model
+    comparison is paired -- two models can cover the same *number* of
+    origins over different subsets (e.g. each with one interior gap at a
+    different date). Callers compare the sets themselves, not just their
+    sizes, to decide whether a comparison is genuinely paired.
+    """
+    pair = df.dropna(subset=["actual"]) if "actual" in df.columns else df
+    return {
+        name: frozenset(pair.loc[pair[col].notna(), "origin_date"])
+        for name, col in model_columns.items()
+        if col in pair.columns
+    }
+
+
+def origin_window_label(df: pd.DataFrame) -> str:
+    """Label a figure with the origins it *actually* contains.
+
+    Origins are weekly, so a requested slider range routinely brackets a
+    strictly narrower realized range -- e.g. a 2015-06-02..2015-06-05
+    selection can resolve to the single origin 2015-06-04. Stamping the
+    *requested* range onto an exported figure misattributes its sample,
+    since the figure is the only record of its own sample once exported.
+    """
+    if df.empty:
+        return "no origins in range"
+    lo, hi = df["origin_date"].min(), df["origin_date"].max()
+    return f"{lo:%Y-%m-%d} – {hi:%Y-%m-%d} (n={df['origin_date'].nunique()})"
 
 
 # =========================================================

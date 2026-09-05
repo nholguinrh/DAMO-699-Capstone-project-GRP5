@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "dashboard"
 from data_loader import (  # noqa: E402
     filter_by_origin_window,
     min_covered_origins,
+    origin_window_label,
     window_model_coverage,
+    window_origin_sets,
 )
 
 
@@ -88,6 +90,79 @@ class TestWindowModelCoverage:
             df, {"Naïve Random Walk": "naive", "XGBoost": "xgboost"}
         )
         assert set(coverage["model"]) == {"Naïve Random Walk"}
+
+    def test_empty_selection_returns_typed_columns(self):
+        """Regression guard (PR #115 review, C1): an empty model selection
+        (e.g. the user clears every chip from 'Models to display') must
+        yield a (0, 2) frame, not a bare (0, 0) frame from
+        pd.DataFrame([]) on an empty list comprehension -- app.py indexes
+        'n_origins' and 'model' unconditionally, so a column-less result
+        is a KeyError that crashes the tab."""
+        coverage = window_model_coverage(pd.DataFrame({"naive": [1.0, 2.0]}), {})
+        assert list(coverage.columns) == ["model", "n_origins"]
+        assert coverage.loc[coverage["n_origins"] == 0, "model"].tolist() == []
+        assert min_covered_origins(coverage) == 0
+
+    def test_no_matching_columns_returns_typed_columns(self):
+        """Same guard for the deployment where r3_xgboost_forecasts.csv is
+        absent and the user selects only XGBoost."""
+        coverage = window_model_coverage(
+            pd.DataFrame({"naive": [1.0]}), {"XGBoost": "xgboost"}
+        )
+        assert list(coverage.columns) == ["model", "n_origins"]
+        assert min_covered_origins(coverage) == 0
+
+    def test_counts_are_paired_on_actual(self):
+        """n must match the chart's dropna(subset=["actual", column]) count,
+        not a plain per-column notna() count (PR #115 review, M2) --
+        otherwise the sample-size gate can overstate what's actually
+        plotted whenever 'actual' itself has a gap a model column doesn't."""
+        df = pd.DataFrame({
+            "actual": [1.0, np.nan, 1.2],
+            "naive": [1.0, 1.0, 1.1],
+        })
+        coverage = window_model_coverage(df, {"Naïve Random Walk": "naive"})
+        assert coverage.set_index("model")["n_origins"]["Naïve Random Walk"] == 2
+
+
+class TestWindowOriginSets:
+    def test_equal_counts_over_different_subsets_are_detected(self):
+        """PR #115 review, M1: cardinality equality does not imply the same
+        origin set. Two models with the same count but a gap at a
+        different date must compare as unpaired."""
+        df = pd.DataFrame({
+            "origin_date": pd.to_datetime(
+                ["2024-01-01", "2024-01-08", "2024-01-15"]
+            ),
+            "actual": [1.0, 1.1, 1.2],
+            "model_a": [1.0, np.nan, 1.2],
+            "model_b": [1.0, 1.1, np.nan],
+        })
+        sets = window_origin_sets(df, {"A": "model_a", "B": "model_b"})
+        assert len(sets["A"]) == len(sets["B"]) == 2
+        assert sets["A"] != sets["B"]
+
+    def test_identical_origin_sets_compare_equal(self):
+        df = pd.DataFrame({
+            "origin_date": pd.to_datetime(["2024-01-01", "2024-01-08"]),
+            "actual": [1.0, 1.1],
+            "model_a": [1.0, 1.1],
+            "model_b": [1.0, 1.1],
+        })
+        sets = window_origin_sets(df, {"A": "model_a", "B": "model_b"})
+        assert sets["A"] == sets["B"]
+
+
+class TestOriginWindowLabel:
+    def test_labels_the_realized_range_not_an_empty_one(self):
+        df = pd.DataFrame({
+            "origin_date": pd.to_datetime(["2024-01-01", "2024-01-08"]),
+        })
+        assert origin_window_label(df) == "2024-01-01 – 2024-01-08 (n=2)"
+
+    def test_empty_frame_does_not_raise(self):
+        assert origin_window_label(pd.DataFrame({"origin_date": []})) == \
+            "no origins in range"
 
 
 class TestMinCoveredOrigins:
