@@ -419,4 +419,43 @@ class TestConformalCalibrationFix:
             "95% interval collapsed to the same width as 90% -- degenerate quantile"
 
 
+# ---------------------------------------------------------------------------
+# Test 7: Hyperparameter tuning contracts (Issue #119)
+# ---------------------------------------------------------------------------
+
+class TestHyperparameterTuningParity:
+    """Verify hyperparameter configuration constants and model factory support."""
+
+    def test_create_model_supports_min_child_weight(self):
+        from xgboost_baseline import create_model, HAS_XGBOOST
+
+        model = create_model(min_child_weight=5.0)
+        if HAS_XGBOOST:
+            assert model.get_params()["min_child_weight"] == 5.0
+        else:
+            # Fallback must instantiate without error
+            assert hasattr(model, "fit")
+
+    def test_run_rolling_cv_accepts_tuned_parameters(self, synthetic_gold_df):
+        from xgboost_baseline import run_rolling_cv
+
+        forecasts_df, metrics_df, _ = run_rolling_cv(
+            synthetic_gold_df,
+            lags=[1, 2],
+            horizons=[1],
+            min_train=36,
+            n_folds=2,
+            n_estimators=5,
+            max_depth=2,
+            learning_rate=0.05,
+            subsample=0.7,
+            colsample_bytree=0.7,
+            min_child_weight=2.0,
+            reg_lambda=2.0,
+        )
+        assert len(forecasts_df) > 0
+        assert len(metrics_df) > 0
+
+
+
 

@@ -524,7 +524,7 @@ Statistics Canada API ──┘           ↓
             "Family": "Tree-Based Machine Learning",
             "Target Formulation": "Cumulative Diff Delta_h y",
             "Information Set": "50 causal lag / rolling features",
-            "Key Mechanism / Specification": "Gradient Boosted Trees (150 estimators, depth 3, lr 0.03) + Tree SHAP + Conformal PIs",
+            "Key Mechanism / Specification": "Gradient Boosted Trees (600 estimators, depth 2, lr 0.01, subsample 0.7) + Tree SHAP + Conformal PIs",
         },
     ])
 

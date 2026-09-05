@@ -302,7 +302,7 @@ def build_common_sample_metrics() -> pd.DataFrame:
         "LSTM (Tuned)": "lstm",
     }
     if "xgboost" in df.columns:
-        model_columns["XGBoost"] = "xgboost"
+        model_columns["XGBoost (Tuned)"] = "xgboost"
 
 
     rows = []

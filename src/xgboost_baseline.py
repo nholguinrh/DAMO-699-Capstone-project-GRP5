@@ -53,6 +53,16 @@ MIN_TRAIN = 500
 N_FOLDS = 5
 SEED = 42
 
+# Default hyperparameters (tuned via leakage-safe search, Issue #119)
+MAX_DEPTH = 2
+LEARNING_RATE = 0.01
+N_ESTIMATORS = 600
+SUBSAMPLE = 0.7
+COLSAMPLE_BYTREE = 0.7
+MIN_CHILD_WEIGHT = 5.0
+REG_LAMBDA = 5.0
+REG_ALPHA = 0.0
+
 # Check for XGBoost availability; provide GradientBoostingRegressor fallback
 try:
     import xgboost as xgb
@@ -250,13 +260,14 @@ def _conformal_quantile_level(n_cal: int, q: float) -> float:
 def create_model(
     loss: str = "squared_error",
     alpha: float | None = None,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
-    subsample: float = 0.8,
-    colsample_bytree: float = 0.8,
-    reg_lambda: float = 1.0,
-    reg_alpha: float = 0.0,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
     random_state: int = SEED,
 ) -> Any:
     """
@@ -273,6 +284,7 @@ def create_model(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
                 random_state=random_state,
@@ -287,6 +299,7 @@ def create_model(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
                 random_state=random_state,
@@ -326,13 +339,14 @@ def run_rolling_cv(
     horizons: list[int] | None = None,
     min_train: int = MIN_TRAIN,
     n_folds: int = N_FOLDS,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
-    subsample: float = 0.8,
-    colsample_bytree: float = 0.8,
-    reg_lambda: float = 1.0,
-    reg_alpha: float = 0.0,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Execute expanding-window rolling CV across all horizons, generating level
@@ -388,6 +402,7 @@ def run_rolling_cv(
                 n_estimators=n_estimators,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                min_child_weight=min_child_weight,
                 reg_lambda=reg_lambda,
                 reg_alpha=reg_alpha,
             )
@@ -423,6 +438,7 @@ def run_rolling_cv(
                     n_estimators=n_estimators,
                     subsample=subsample,
                     colsample_bytree=colsample_bytree,
+                    min_child_weight=min_child_weight,
                     reg_lambda=reg_lambda,
                     reg_alpha=reg_alpha,
                 )
@@ -545,9 +561,14 @@ def compute_tree_shap_interpretability(
     df: pd.DataFrame,
     lags: list[int] | None = None,
     horizons: list[int] | None = None,
-    max_depth: int = 3,
-    learning_rate: float = 0.03,
-    n_estimators: int = 150,
+    max_depth: int = MAX_DEPTH,
+    learning_rate: float = LEARNING_RATE,
+    n_estimators: int = N_ESTIMATORS,
+    subsample: float = SUBSAMPLE,
+    colsample_bytree: float = COLSAMPLE_BYTREE,
+    min_child_weight: float = MIN_CHILD_WEIGHT,
+    reg_lambda: float = REG_LAMBDA,
+    reg_alpha: float = REG_ALPHA,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Train full-sample models for each horizon and compute exact SHAP values.
@@ -581,6 +602,11 @@ def compute_tree_shap_interpretability(
             max_depth=max_depth,
             learning_rate=learning_rate,
             n_estimators=n_estimators,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            min_child_weight=min_child_weight,
+            reg_lambda=reg_lambda,
+            reg_alpha=reg_alpha,
         )
         model.fit(X, y)
 

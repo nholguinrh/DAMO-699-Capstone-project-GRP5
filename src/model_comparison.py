@@ -789,7 +789,7 @@ def run_clark_west_battery(
         ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if m_xgb is not None:
-        primary_models.append(("xgboost", "XGBoost", "xgboost"))
+        primary_models.append(("xgboost", "XGBoost (Tuned)", "xgboost"))
 
     sensitivity_models = [
         ("arima_bic", "ARIMA-BIC", "core"),
@@ -958,7 +958,7 @@ def evaluate_regime_segmentation(
         ("lstm", "LSTM (Tuned)", "lstm"),
     ]
     if has_xgb and m_xgb is not None:
-        models_to_eval.append(("xgboost", "XGBoost", "xgboost"))
+        models_to_eval.append(("xgboost", "XGBoost (Tuned)", "xgboost"))
 
     records = []
     for regime_name, start_date, end_date in REGIMES:

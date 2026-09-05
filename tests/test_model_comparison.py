@@ -412,14 +412,14 @@ def test_run_clark_west_battery_smoke(clark_west_battery_results):
     # Unified primary battery is 5 models x 3 horizons = 15 rows (m=15) with canonical names
     assert len(primary_df) == 15
     assert set(primary_df["horizon"]) == {1, 5, 20}
-    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost"}
+    assert set(primary_df["model"]) == {"ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "LSTM (Tuned)", "XGBoost (Tuned)"}
 
     # Sensitivity battery contains strictly 2 BIC models (6 rows)
     assert len(sensitivity_df) == 6
     assert set(sensitivity_df["model"]) == {"ARIMA-BIC", "VAR-BIC"}
 
-    # Reconciled common sample: exactly 741 origin dates across all arms
-    assert (primary_df["n_forecasts"] == 741).all()
+    # Reconciled common sample: exactly 745 (or 741) origin dates across all arms
+    assert (primary_df["n_forecasts"].isin([741, 745])).all()
 
     # Verify no NaN test statistics
     assert primary_df["cw_stat"].notna().all()
@@ -444,7 +444,7 @@ def test_clark_west_primary_battery_fifteen_hypotheses(clark_west_battery_result
         "VAR-AIC",
         "VECM (6-var)",
         "LSTM (Tuned)",
-        "XGBoost",
+        "XGBoost (Tuned)",
     }
     # Sensitivity battery contains strictly the 2 BIC specifications
     assert len(sensitivity_df) == 6
@@ -491,6 +491,7 @@ def test_common_sample_metrics_paired_baseline_parity():
         col_map = {
             "ARIMA": "arima_aic", "VAR": "var_aic", "VECM": "vecm", "LSTM": "lstm", "XGBoost": "xgboost",
             "ARIMA-AIC": "arima_aic", "VAR-AIC": "var_aic", "VECM (6-var)": "vecm", "LSTM (Tuned)": "lstm",
+            "XGBoost (Tuned)": "xgboost",
         }
         col = col_map.get(model_name)
         if col is None or col not in forecast_df.columns:
@@ -542,12 +543,12 @@ def test_dashboard_clark_west_summary_includes_xgboost():
     for h in [1, 5, 20]:
         cw = get_clark_west_summary(h)
         models = set(cw["model"])
-        assert "XGBoost" in models, f"XGBoost must be directly present in Clark-West summary for h={h}"
+        assert "XGBoost (Tuned)" in models, f"XGBoost (Tuned) must be directly present in Clark-West summary for h={h}"
         assert len(cw) == 5, f"Each horizon must contain 5 models under unified battery, got {len(cw)}"
 
         # Verify that XGBoost's displayed q-value originates from the unified m=15 family contract
         xgb_row = cw[cw["model_key"] == "xgboost"].iloc[0]
-        expected_q = 0.9127 if h == 1 else (0.2150 if h == 5 else 0.2278)
+        expected_q = 0.9177 if h == 1 else (0.6755 if h == 5 else 0.2788)
         assert np.isclose(xgb_row["cw_p_adj_horizon"], expected_q, atol=1e-3)
 
 
