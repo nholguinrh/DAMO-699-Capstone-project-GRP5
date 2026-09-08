@@ -20,7 +20,8 @@ COLOR_STEEL = "#5c768d"
 COLOR_SLATE_DARK = "#475569"
 COLOR_SLATE_MED = "#64748b"
 COLOR_SLATE_LIGHT = "#94a3b8"
-COLOR_BRONZE = "#b45309"
+COLOR_ORANGE = "#f97316"
+COLOR_BRONZE = COLOR_ORANGE
 COLOR_CHARCOAL = "#1e293b"
 COLOR_BG_LIGHT = "#f8fafc"
 COLOR_BORDER = "#cbd5e1"
@@ -32,7 +33,7 @@ MODEL_PALETTE = {
     "ARIMA-AIC": COLOR_SLATE_MED,
     "VAR-AIC": COLOR_SLATE_DARK,
     "VECM (6-var)": COLOR_NAVY,
-    "XGBoost (Tuned)": COLOR_BRONZE,
+    "XGBoost (Tuned)": COLOR_ORANGE,
     "LSTM (Tuned)": COLOR_CORAL
 }
 
@@ -150,12 +151,12 @@ def generate_figure_03():
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 7.5), facecolor="white")
 
-    sns.heatmap(levels_corr, cmap=POSTER_CMAP, center=0, vmin=-1.0, vmax=1.0,
+    sns.heatmap(levels_corr, cmap="RdBu_r", center=0, vmin=-1.0, vmax=1.0,
                 ax=axes[0], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[0].set_title("(a) Correlation in Levels (Persistent / Non-Stationary Space)", pad=12)
     axes[0].tick_params(axis='x', rotation=45)
 
-    sns.heatmap(diffs_corr, cmap=POSTER_CMAP, center=0, vmin=-1.0, vmax=1.0,
+    sns.heatmap(diffs_corr, cmap="RdBu_r", center=0, vmin=-1.0, vmax=1.0,
                 ax=axes[1], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[1].set_title("(b) Correlation in Stationary First Differences (Short-Run Co-Movement)", pad=12)
     axes[1].tick_params(axis='x', rotation=45)
@@ -342,7 +343,7 @@ def generate_figure_07():
     # Panel A: Unadjusted Campbell-Thompson R²_OOS (percentage)
     for idx, m in enumerate(models):
         r2_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos"].iloc[0] * 100 for h in horizons]
-        axes[0].bar(x - 2*width + idx*width, r2_vals, width, label=m, color=model_colors[m], alpha=0.95)
+        axes[0].bar(x - 2*width + idx*width, r2_vals, width, label=m, color=model_colors[m], alpha=0.95, edgecolor="#333333", linewidth=0.7)
 
     axes[0].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[0].set_xticks(x)
@@ -355,7 +356,7 @@ def generate_figure_07():
     # Panel B: Clark-West Adjusted R²_OOS,adj (percentage)
     for idx, m in enumerate(models):
         r2_adj_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos_adj"].iloc[0] * 100 for h in horizons]
-        axes[1].bar(x - 2*width + idx*width, r2_adj_vals, width, label=m, color=model_colors[m], alpha=0.95)
+        axes[1].bar(x - 2*width + idx*width, r2_adj_vals, width, label=m, color=model_colors[m], alpha=0.95, edgecolor="#333333", linewidth=0.7)
 
     axes[1].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[1].set_xticks(x)

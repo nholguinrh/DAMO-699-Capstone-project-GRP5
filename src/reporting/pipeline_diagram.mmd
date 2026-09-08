@@ -1,71 +1,60 @@
 flowchart TD
     subgraph S1 ["1. Institutional Data Ingestion (Bronze Layer)"]
-        A["Bank of Canada (Valet API)<br>Overnight Rate, GoC 2Y-10Y, USD/CAD"]
-        B["Federal Reserve (FRED API)<br>U.S. 10Y Treasury, Fed Funds Rate"]
-        C["Statistics Canada (WDS)<br>Headline CPI (Table 18-10-0004-01)"]
+        A["Bank of Canada (Valet API)<br>Overnight Rate, GoC 2Y–10Y, USD/CAD"] ~~~ B["Federal Reserve (FRED API)<br>U.S. 10Y Treasury, Fed Funds Rate"] ~~~ C["Statistics Canada (WDS)<br>Headline CPI (Table 18-10-0004-01)"]
     end
 
     subgraph S2 ["2. Data Cleaning & Source Processing (Silver Layer)"]
-        D["Silver Layer: Ingestion validation, schema typing & stitching<br>Bank of Canada, FRED and StatCan individual clean tables"]
+        D1["Schema Typing & Validation<br>Type casting, UTC timestamps & null audit"] ~~~ D2["Cross-Source Synchronization<br>Automated daily API ingestion & staging"] ~~~ D3["Multi-Source Table Stitching<br>Harmonized BoC, FRED & StatCan daily series"]
     end
 
-    subgraph S3 ["3. Exploratory Data Analysis & Diagnostics (EDA)"]
-        E["• ADF Stationarity Tests: Proved I(1) levels ⟹ Mandated first-differencing (Δ)<br>• Publication Lag Audit: CPI vintage release-date mapping (no look-ahead bias)<br>• Calendar Audit: Reconciled cross-border holidays (max 2-day forward-fill)"]
+    subgraph S3 ["3. Exploratory Data Analysis & Diagnostics (EDA Bridge)"]
+        E1["ADF Stationarity Tests<br>Confirmed I(1) non-stationarity ⟹ Mandated differencing (Δ)"] ~~~ E2["Publication Lag Audit<br>Mapped real-time CPI release vintages (zero look-ahead bias)"] ~~~ E3["Calendar Harmonization<br>Reconciled cross-border holiday mismatches (max 2d ffill)"]
     end
 
     subgraph S4 ["4. Unified Feature Store (Gold Layer)"]
-        F["Gold Feature Store: 4,268 Daily Observations (2009–2026)<br>Target: 10Y–2Y spread cumulative h-day changes & reconstructed levels<br>Stationarized macro predictors: Δovernight, Δus_treasury, Δfed_funds, Δusdcad, cpi_yoy"]
+        F1["Target Formulation<br>Canadian 10Y–2Y spread cumulative changes (Δs) & levels"] ~~~ F2["Predictor Matrix<br>Stationarized macro drivers (Δovernight, Δus10y, Δff, cpi_yoy)"] ~~~ F3["Master Gold Dataset<br>4,268 synchronized daily observations (2009–2026)"]
     end
 
     subgraph S5 ["5. Forecasting Paradigms (Naïve Benchmark + 5 Candidate Models)"]
-        G["Naïve Random Walk<br>(Benchmark: Δs = 0)"]
-        H["ARIMA(2,0,3)<br>(Univariate AIC)"]
-        I["VAR(1)<br>(Multivariate AIC)"]
-        J["VECM 6-var<br>(Johansen r=1)"]
-        K["XGBoost Tuned<br>(Tabular ML)"]
-        L["LSTM Tuned<br>(Recurrent Neural Net)"]
+        direction TB
+        subgraph S5_1 ["Linear Benchmark & Time Series Baseline"]
+            G["Naïve Random Walk<br>(Benchmark: Δs = 0)"] ~~~ H["ARIMA(2,0,3)<br>(Univariate AIC)"] ~~~ I["VAR(1)<br>(Multivariate AIC)"]
+        end
+        subgraph S5_2 ["Multivariate Cointegrated & Machine Learning Challengers"]
+            J["VECM 6-var<br>(Johansen Cointegration r=1)"] ~~~ K["XGBoost Tuned<br>(Regularized Tabular ML)"] ~~~ L["LSTM Tuned<br>(Recurrent Neural Network)"]
+        end
+        S5_1 ~~~ S5_2
     end
 
     subgraph S6 ["6. Multi-Horizon Evaluation & Multiplicity Control"]
-        M["Expanding-Window Backtesting: 741 Synchronized Origins (h ∈ {1, 5, 20})<br>Clark-West (2007) Adjusted MSPE Battery (15 Tests)<br>Benjamini-Hochberg (1995) FDR Multiplicity Control (α = 0.05)"]
+        M1["Expanding-Window Backtesting<br>741 synchronized out-of-sample origins (h ∈ {1, 5, 20})"] ~~~ M2["Clark-West (2007) Tests<br>Adjusted MSPE for nested model parameter noise"] ~~~ M3["Benjamini-Hochberg (1995) FDR<br>Multiplicity control across 15 hypotheses (α = 0.05)"]
     end
 
     subgraph S7 ["7. Applied Translation & Operational Decision Support"]
-        N["Streamlit Executive Decision-Support Dashboard (streamlit_app.py)"]
+        N1["Executive Decision Dashboard<br>Interactive Streamlit interface (streamlit_app.py)"] ~~~ N2["Dynamic Regime Engine<br>Real-time slope classification & multi-model consensus"] ~~~ N3["Operational Governance<br>Automated institutional monitoring & risk threshold alerts"]
     end
 
-    A --> D
-    B --> D
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    F --> H
-    F --> I
-    F --> J
-    F --> K
-    F --> L
-    G --> M
-    H --> M
-    I --> M
-    J --> M
-    K --> M
-    L --> M
-    M --> N
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+    S6 --> S7
 
     style S1 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
     style S2 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
-    style S3 fill:#fff8f6,stroke:#e64b3c,stroke-width:1.5px
+    style S3 fill:#fff8f6,stroke:#e64b3c,stroke-width:2px
     style S4 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
     style S5 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
-    style S6 fill:#fff8f6,stroke:#e64b3c,stroke-width:1.5px
+    style S5_1 fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+    style S5_2 fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+    style S6 fill:#fff8f6,stroke:#e64b3c,stroke-width:2px
     style S7 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
 
     classDef defaultNode fill:#ffffff,stroke:#2d3c50,stroke-width:1.2px,color:#1e293b;
-    classDef accentNode fill:#ffffff,stroke:#e64b3c,stroke-width:1.4px,color:#1e293b;
+    classDef accentNode fill:#ffffff,stroke:#e64b3c,stroke-width:1.5px,color:#1e293b;
     classDef darkNode fill:#2d3c50,stroke:#1e293b,stroke-width:1.2px,color:#ffffff;
-    classDef highlightNode fill:#e64b3c,stroke:#b91c1c,stroke-width:1.2px,color:#ffffff;
 
-    class A,B,C,D,F,G,H,I,J,K,L defaultNode;
-    class E,M accentNode;
-    class N darkNode;
+    class A,B,C,D1,D2,D3,F1,F2,F3,G,H,I,J,K,L defaultNode;
+    class E1,E2,E3,M1,M2,M3 accentNode;
+    class N1,N2,N3 darkNode;
