@@ -53,26 +53,19 @@ flowchart TD
     L --> M
     M --> N
 
-    style S1 fill:#fffdf0,stroke:#d97706,stroke-width:1.5px
-    style S2 fill:#f0f9ff,stroke:#0284c7,stroke-width:1.5px
-    style S3 fill:#faf5ff,stroke:#9333ea,stroke-width:1.5px
-    style S4 fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px
-    style S5 fill:#f8fafc,stroke:#475569,stroke-width:1.5px
-    style S6 fill:#fef2f2,stroke:#dc2626,stroke-width:1.5px
-    style S7 fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px
+    style S1 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S2 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S3 fill:#fff8f6,stroke:#e64b3c,stroke-width:1.5px
+    style S4 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S5 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S6 fill:#fff8f6,stroke:#e64b3c,stroke-width:1.5px
+    style S7 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
 
-    classDef bronze fill:#fef08a,stroke:#ca8a04,stroke-width:1.5px,color:#713f12;
-    classDef silver fill:#bae6fd,stroke:#0284c7,stroke-width:1.5px,color:#075985;
-    classDef eda fill:#e9d5ff,stroke:#9333ea,stroke-width:1.5px,color:#581c87;
-    classDef gold fill:#bbf7d0,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
-    classDef models fill:#ffffff,stroke:#475569,stroke-width:1.5px,color:#0f172a;
-    classDef eval fill:#fecaca,stroke:#dc2626,stroke-width:1.5px,color:#7f1d1d;
-    classDef dash fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#1e40af;
+    classDef defaultNode fill:#ffffff,stroke:#2d3c50,stroke-width:1.2px,color:#1e293b;
+    classDef accentNode fill:#ffffff,stroke:#e64b3c,stroke-width:1.4px,color:#1e293b;
+    classDef darkNode fill:#2d3c50,stroke:#1e293b,stroke-width:1.2px,color:#ffffff;
+    classDef highlightNode fill:#e64b3c,stroke:#b91c1c,stroke-width:1.2px,color:#ffffff;
 
-    class A,B,C bronze;
-    class D silver;
-    class E eda;
-    class F gold;
-    class G,H,I,J,K,L models;
-    class M eval;
-    class N dash;
+    class A,B,C,D,F,G,H,I,J,K,L defaultNode;
+    class E,M accentNode;
+    class N darkNode;

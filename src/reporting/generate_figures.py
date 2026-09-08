@@ -11,6 +11,30 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
+
+# Academic Scientific Poster Palette (Navy #2D3C50, Terracotta/Coral #E64B3C)
+COLOR_NAVY = "#2d3c50"
+COLOR_CORAL = "#e64b3c"
+COLOR_STEEL = "#5c768d"
+COLOR_SLATE_DARK = "#475569"
+COLOR_SLATE_MED = "#64748b"
+COLOR_SLATE_LIGHT = "#94a3b8"
+COLOR_BRONZE = "#b45309"
+COLOR_CHARCOAL = "#1e293b"
+COLOR_BG_LIGHT = "#f8fafc"
+COLOR_BORDER = "#cbd5e1"
+
+POSTER_CMAP = LinearSegmentedColormap.from_list("poster_cmap", [COLOR_NAVY, "#ffffff", COLOR_CORAL])
+
+MODEL_PALETTE = {
+    "Naïve Random Walk": COLOR_SLATE_LIGHT,
+    "ARIMA-AIC": COLOR_SLATE_MED,
+    "VAR-AIC": COLOR_SLATE_DARK,
+    "VECM (6-var)": COLOR_NAVY,
+    "XGBoost (Tuned)": COLOR_BRONZE,
+    "LSTM (Tuned)": COLOR_CORAL
+}
 
 # Configure APA 7 styling defaults
 plt.rcParams["font.family"] = "sans-serif"
@@ -60,10 +84,10 @@ def generate_figure_02():
     fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True, facecolor="white")
 
     # Panel A: Yields
-    axes[0].plot(gold["date"], gold["yield_2y"], label="GoC 2-Year Yield", color="#0284c7", linewidth=1.4)
-    axes[0].plot(gold["date"], gold["yield_5y"], label="GoC 5-Year Yield", color="#64748b", linewidth=1.1, alpha=0.7)
-    axes[0].plot(gold["date"], gold["yield_10y"], label="GoC 10-Year Yield", color="#1e3a8a", linewidth=1.6)
-    axes[0].plot(gold["date"], gold["overnight_rate"], label="BoC Overnight Policy Rate", color="#dc2626", linewidth=1.2, linestyle=":")
+    axes[0].plot(gold["date"], gold["yield_2y"], label="GoC 2-Year Yield", color=COLOR_STEEL, linewidth=1.4)
+    axes[0].plot(gold["date"], gold["yield_5y"], label="GoC 5-Year Yield", color=COLOR_SLATE_LIGHT, linewidth=1.1, alpha=0.85)
+    axes[0].plot(gold["date"], gold["yield_10y"], label="GoC 10-Year Yield", color=COLOR_NAVY, linewidth=1.6)
+    axes[0].plot(gold["date"], gold["overnight_rate"], label="BoC Overnight Policy Rate", color=COLOR_CORAL, linewidth=1.3, linestyle=":")
     axes[0].set_ylabel("Annualized Yield (%)")
     axes[0].set_title("(a) Government of Canada Benchmark Yield Curves and Policy Rate (2010–2026)")
     axes[0].legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#e5e7eb")
@@ -71,12 +95,12 @@ def generate_figure_02():
 
     # Panel B: Spread & Inversions
     spread = gold["yield_spread_10y_2y"]
-    axes[1].plot(gold["date"], spread, label="Canadian 10Y–2Y Spread", color="#0f172a", linewidth=1.4)
-    axes[1].axhline(0, color="#b91c1c", linestyle="--", linewidth=1.2, label="Inversion Threshold (0.0%)")
+    axes[1].plot(gold["date"], spread, label="Canadian 10Y–2Y Spread", color=COLOR_NAVY, linewidth=1.5)
+    axes[1].axhline(0, color=COLOR_CORAL, linestyle="--", linewidth=1.2, label="Inversion Threshold (0.0%)")
     
     # Shade inversion regions
-    axes[1].fill_between(gold["date"], spread, 0, where=(spread < 0), color="#f87171", alpha=0.35, label="Yield Curve Inversion (Spread < 0)")
-    axes[1].fill_between(gold["date"], spread, 0, where=(spread >= 0), color="#93c5fd", alpha=0.25, label="Normal Upward Slope (Spread ≥ 0)")
+    axes[1].fill_between(gold["date"], spread, 0, where=(spread < 0), color=COLOR_CORAL, alpha=0.20, label="Yield Curve Inversion (Spread < 0)")
+    axes[1].fill_between(gold["date"], spread, 0, where=(spread >= 0), color=COLOR_BORDER, alpha=0.35, label="Normal Upward Slope (Spread ≥ 0)")
     
     axes[1].set_ylabel("Yield Spread (Percentage Points)")
     axes[1].set_xlabel("Observation Date")
@@ -126,12 +150,12 @@ def generate_figure_03():
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 7.5), facecolor="white")
 
-    sns.heatmap(levels_corr, cmap="vlag", center=0, vmin=-1.0, vmax=1.0,
+    sns.heatmap(levels_corr, cmap=POSTER_CMAP, center=0, vmin=-1.0, vmax=1.0,
                 ax=axes[0], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[0].set_title("(a) Correlation in Levels (Persistent / Non-Stationary Space)", pad=12)
     axes[0].tick_params(axis='x', rotation=45)
 
-    sns.heatmap(diffs_corr, cmap="vlag", center=0, vmin=-1.0, vmax=1.0,
+    sns.heatmap(diffs_corr, cmap=POSTER_CMAP, center=0, vmin=-1.0, vmax=1.0,
                 ax=axes[1], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[1].set_title("(b) Correlation in Stationary First Differences (Short-Run Co-Movement)", pad=12)
     axes[1].tick_params(axis='x', rotation=45)
@@ -156,14 +180,7 @@ def generate_figure_04():
     
     horizons = [1, 5, 20]
     models = ["ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
-    model_colors = {
-        "Naïve Random Walk": "#64748b",
-        "ARIMA-AIC": "#f59e0b",
-        "VAR-AIC": "#3b82f6",
-        "VECM (6-var)": "#10b981",
-        "XGBoost (Tuned)": "#8b5cf6",
-        "LSTM (Tuned)": "#ec4899"
-    }
+    model_colors = MODEL_PALETTE
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor="white")
 
@@ -173,11 +190,11 @@ def generate_figure_04():
 
     # Plot RMSE
     naive_rmse = [np.sqrt(cw[cw["horizon"] == h]["mspe_naive"].iloc[0]) for h in horizons]
-    axes[0].bar(x - 2.5*width, naive_rmse, width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.9)
+    axes[0].bar(x - 2.5*width, naive_rmse, width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.95)
 
     for idx, m in enumerate(models):
         m_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["rmse_model"].iloc[0] for h in horizons]
-        axes[0].bar(x - 1.5*width + idx*width, m_vals, width, label=m, color=model_colors[m], alpha=0.9)
+        axes[0].bar(x - 1.5*width + idx*width, m_vals, width, label=m, color=model_colors[m], alpha=0.95)
 
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
@@ -196,9 +213,9 @@ def generate_figure_04():
         "LSTM (Tuned)": [0.0212, 0.0469, 0.0998]
     }
 
-    axes[1].bar(x - 2.5*width, mae_dict["Naïve Random Walk"], width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.9)
+    axes[1].bar(x - 2.5*width, mae_dict["Naïve Random Walk"], width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.95)
     for idx, m in enumerate(models):
-        axes[1].bar(x - 1.5*width + idx*width, mae_dict[m], width, label=m, color=model_colors[m], alpha=0.9)
+        axes[1].bar(x - 1.5*width + idx*width, mae_dict[m], width, label=m, color=model_colors[m], alpha=0.95)
 
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
@@ -226,15 +243,15 @@ def generate_figure_05():
 
     fig, ax = plt.subplots(figsize=(14, 6), facecolor="white")
 
-    ax.plot(df_20["origin_date"], df_20["actual"], label="Realized Spread (Actual s_{t+20})", color="#0f172a", linewidth=2.0)
-    ax.plot(df_20["origin_date"], df_20["naive"], label="Naïve Benchmark (Zero-Change s_t)", color="#64748b", linestyle="--", linewidth=1.4)
-    ax.plot(df_20["origin_date"], df_20["vecm"], label="VECM 6-var Challenger Forecast", color="#10b981", linewidth=1.8)
+    ax.plot(df_20["origin_date"], df_20["actual"], label="Realized Spread (Actual s_{t+20})", color=COLOR_CHARCOAL, linewidth=2.0)
+    ax.plot(df_20["origin_date"], df_20["naive"], label="Naïve Benchmark (Zero-Change s_t)", color=COLOR_SLATE_LIGHT, linestyle="--", linewidth=1.4)
+    ax.plot(df_20["origin_date"], df_20["vecm"], label="VECM 6-var Challenger Forecast", color=COLOR_CORAL, linewidth=1.8)
 
     if "vecm_lower_95" in df_20.columns and "vecm_upper_95" in df_20.columns:
         ax.fill_between(df_20["origin_date"], df_20["vecm_lower_95"], df_20["vecm_upper_95"],
-                        color="#10b981", alpha=0.18, label="VECM 95% Analytical Prediction Interval")
+                        color=COLOR_CORAL, alpha=0.15, label="VECM 95% Analytical Prediction Interval")
 
-    ax.axhline(0, color="#b91c1c", linestyle=":", linewidth=1.0, alpha=0.7)
+    ax.axhline(0, color=COLOR_NAVY, linestyle=":", linewidth=1.0, alpha=0.7)
     ax.set_ylabel("Yield Spread (Percentage Points)")
     ax.set_xlabel("Forecast Origin Date (t)")
     ax.set_title("Chronological Out-of-Sample Forecast Trajectories vs. Realized Spread at the 20-Day Horizon (2023–2026)")
@@ -268,11 +285,11 @@ def generate_figure_06():
         x = np.arange(len(models))
         width = 0.35
 
-        rects1 = ax.bar(x - width/2, sub["cw_p_value"], width, label="Raw p-value", color="#0052cc")
-        rects2 = ax.bar(x + width/2, sub["cw_p_adj_horizon"], width, label="FDR-adjusted q-value", color="#4c9aff")
+        rects1 = ax.bar(x - width/2, sub["cw_p_value"], width, label="Raw p-value", color=COLOR_NAVY)
+        rects2 = ax.bar(x + width/2, sub["cw_p_adj_horizon"], width, label="FDR-adjusted q-value", color=COLOR_STEEL)
 
         # Threshold line
-        ax.axhline(0.05, color="#111827", linestyle="--", linewidth=1.5, label="Significance Threshold (α = 0.05)")
+        ax.axhline(0.05, color=COLOR_CORAL, linestyle="--", linewidth=1.5, label="Significance Threshold (α = 0.05)")
 
         # Value labels
         for rect in rects1:
@@ -281,7 +298,7 @@ def generate_figure_06():
                 ax.annotate(f"{height:.3f}",
                             xy=(rect.get_x() + rect.get_width() / 2, height),
                             xytext=(0, 3), textcoords="offset points",
-                            ha='center', va='bottom', fontsize=8.5)
+                            ha='center', va='bottom', fontsize=8.5, color=COLOR_NAVY)
 
         for rect in rects2:
             height = rect.get_height()
@@ -289,7 +306,7 @@ def generate_figure_06():
                 ax.annotate(f"{height:.3f}",
                             xy=(rect.get_x() + rect.get_width() / 2, height),
                             xytext=(0, 3), textcoords="offset points",
-                            ha='center', va='bottom', fontsize=8.5, color="#1e40af")
+                            ha='center', va='bottom', fontsize=8.5, color=COLOR_STEEL)
 
         ax.set_title(title, pad=10)
         ax.set_xticks(x)
@@ -315,13 +332,7 @@ def generate_figure_07():
 
     horizons = [1, 5, 20]
     models = ["ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
-    model_colors = {
-        "ARIMA-AIC": "#f59e0b",
-        "VAR-AIC": "#3b82f6",
-        "VECM (6-var)": "#10b981",
-        "XGBoost (Tuned)": "#8b5cf6",
-        "LSTM (Tuned)": "#ec4899"
-    }
+    model_colors = MODEL_PALETTE
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor="white")
 
@@ -331,9 +342,9 @@ def generate_figure_07():
     # Panel A: Unadjusted Campbell-Thompson R²_OOS (percentage)
     for idx, m in enumerate(models):
         r2_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos"].iloc[0] * 100 for h in horizons]
-        axes[0].bar(x - 2*width + idx*width, r2_vals, width, label=m, color=model_colors[m], alpha=0.9)
+        axes[0].bar(x - 2*width + idx*width, r2_vals, width, label=m, color=model_colors[m], alpha=0.95)
 
-    axes[0].axhline(0, color="#111827", linestyle="-", linewidth=1.2)
+    axes[0].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
     axes[0].set_ylabel("Campbell-Thompson Out-of-Sample R² (%)")
@@ -344,9 +355,9 @@ def generate_figure_07():
     # Panel B: Clark-West Adjusted R²_OOS,adj (percentage)
     for idx, m in enumerate(models):
         r2_adj_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos_adj"].iloc[0] * 100 for h in horizons]
-        axes[1].bar(x - 2*width + idx*width, r2_adj_vals, width, label=m, color=model_colors[m], alpha=0.9)
+        axes[1].bar(x - 2*width + idx*width, r2_adj_vals, width, label=m, color=model_colors[m], alpha=0.95)
 
-    axes[1].axhline(0, color="#111827", linestyle="-", linewidth=1.2)
+    axes[1].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
     axes[1].set_ylabel("Clark-West Adjusted Out-of-Sample R² (%)")
@@ -383,7 +394,7 @@ def generate_figure_08():
     # Panel A: LSTM Global SHAP
     lstm_sorted = lstm_shap.sort_values("mean_abs_shap", ascending=True)
     clean_lstm_labels = [feature_labels.get(f, f) for f in lstm_sorted["feature"]]
-    axes[0].barh(clean_lstm_labels, lstm_sorted["mean_abs_shap"], color="#ec4899", alpha=0.85, edgecolor="#be185d")
+    axes[0].barh(clean_lstm_labels, lstm_sorted["mean_abs_shap"], color=COLOR_CORAL, alpha=0.9, edgecolor="#b91c1c")
     axes[0].set_xlabel("Mean Absolute SHAP Value (Predictive Attribution)")
     axes[0].set_title("(a) LSTM Recurrent Neural Network: Global Feature Attribution (1-Day Ahead)")
     axes[0].grid(axis="x")
@@ -392,7 +403,7 @@ def generate_figure_08():
     xgb_20 = xgb_shap[xgb_shap["horizon"] == 20].sort_values("mean_abs_shap", ascending=False).head(8)
     xgb_sorted = xgb_20.sort_values("mean_abs_shap", ascending=True)
     clean_xgb_labels = [feature_labels.get(f, f.replace("d_", "Δ ").replace("_", " ")) for f in xgb_sorted["feature"]]
-    axes[1].barh(clean_xgb_labels, xgb_sorted["mean_abs_shap"], color="#8b5cf6", alpha=0.85, edgecolor="#6d28d9")
+    axes[1].barh(clean_xgb_labels, xgb_sorted["mean_abs_shap"], color=COLOR_NAVY, alpha=0.9, edgecolor=COLOR_CHARCOAL)
     axes[1].set_xlabel("Mean Absolute SHAP Value (Predictive Attribution)")
     axes[1].set_title("(b) XGBoost Regressor: Top Predictor Attribution (20-Day Horizon)")
     axes[1].grid(axis="x")
@@ -417,17 +428,17 @@ def generate_figure_09():
     # Panel A: IRF
     sub_irf = irf[irf["response_variable"].isin(["yield_spread_10y_2y", "yield_2y", "yield_10y", "usdcad"])].copy()
     display_irf = {
-        "yield_spread_10y_2y": ("10Y–2Y Yield Spread", "#0f172a", 2.2),
-        "yield_2y": ("GoC 2Y Benchmark Yield", "#0284c7", 1.5),
-        "yield_10y": ("GoC 10Y Benchmark Yield", "#1e3a8a", 1.5),
-        "usdcad": ("USD/CAD Exchange Rate", "#dc2626", 1.2)
+        "yield_spread_10y_2y": ("10Y–2Y Yield Spread", COLOR_NAVY, 2.2),
+        "yield_2y": ("GoC 2Y Benchmark Yield", COLOR_STEEL, 1.5),
+        "yield_10y": ("GoC 10Y Benchmark Yield", COLOR_SLATE_LIGHT, 1.5),
+        "usdcad": ("USD/CAD Exchange Rate", COLOR_CORAL, 1.3)
     }
 
     for var, (label, color, lw) in display_irf.items():
         v_data = sub_irf[sub_irf["response_variable"] == var]
         axes[0].plot(v_data["horizon_days"], v_data["response"], label=label, color=color, linewidth=lw)
 
-    axes[0].axhline(0, color="#64748b", linestyle="--", linewidth=1.0)
+    axes[0].axhline(0, color=COLOR_SLATE_MED, linestyle="--", linewidth=1.0)
     axes[0].set_xlabel("Horizon (Trading Days Ahead)")
     axes[0].set_ylabel("Orthogonalized Response (Percentage Points)")
     axes[0].set_title("(a) Orthogonalized Impulse Responses to 100 bps BoC Overnight Policy Rate Shock")
@@ -448,8 +459,8 @@ def generate_figure_09():
     }
     pivot_fevd = pivot_fevd.rename(columns=rename_shocks)
     
-    colors = ["#0f172a", "#dc2626", "#1e3a8a", "#0284c7", "#f59e0b", "#10b981"]
-    axes[1].stackplot(pivot_fevd.index, pivot_fevd.T.values, labels=pivot_fevd.columns, colors=colors, alpha=0.85)
+    colors = [COLOR_NAVY, COLOR_CORAL, COLOR_STEEL, COLOR_SLATE_LIGHT, COLOR_BRONZE, COLOR_BORDER]
+    axes[1].stackplot(pivot_fevd.index, pivot_fevd.T.values, labels=pivot_fevd.columns, colors=colors, alpha=0.9)
     axes[1].set_xlabel("Horizon (Trading Days Ahead)")
     axes[1].set_ylabel("Share of Forecast Error Variance")
     axes[1].set_ylim(0, 1.0)
@@ -477,26 +488,26 @@ def generate_figure_10():
     outer = patches.FancyBboxPatch(
         (2, 2), 96, 96,
         boxstyle="round,pad=1.0,rounding_size=1.5",
-        edgecolor="#2563eb", facecolor="#f8fafc", linewidth=2.0
+        edgecolor=COLOR_NAVY, facecolor=COLOR_BG_LIGHT, linewidth=1.8
     )
     ax.add_patch(outer)
 
     header = patches.FancyBboxPatch(
         (4, 86), 92, 10,
         boxstyle="round,pad=0.5,rounding_size=1.0",
-        edgecolor="#1e3a8a", facecolor="#1e3a8a"
+        edgecolor=COLOR_NAVY, facecolor=COLOR_NAVY
     )
     ax.add_patch(header)
     ax.text(6, 92, "CANADIAN YIELD SPREAD FORECASTING — EXECUTIVE DECISION DASHBOARD",
             color="white", fontsize=13, fontweight="bold", va="center")
     ax.text(6, 88.5, "Live Institutional Decision Support & Model Governance Framework | Module: streamlit_app.py",
-            color="#93c5fd", fontsize=9.5, va="center")
+            color="#cbd5e1", fontsize=9.5, va="center")
 
     cards = [
-        {"title": "Active Operational Benchmark", "val": "Naïve Random Walk", "sub": "Zero-change rule (Δs = 0)", "color": "#0284c7", "x": 5},
-        {"title": "Qualified Challenger Model", "val": "VECM 6-Variable", "sub": "Candidate for 20-day horizon", "color": "#10b981", "x": 28.5},
-        {"title": "Synchronized Backtest Origins", "val": "741 Trading Days", "sub": "Common calendar evaluation", "color": "#6366f1", "x": 52},
-        {"title": "FDR Multiplicity Threshold", "val": "α = 0.05 (q < 0.05)", "sub": "Benjamini-Hochberg (1995)", "color": "#f59e0b", "x": 75.5}
+        {"title": "Active Operational Benchmark", "val": "Naïve Random Walk", "sub": "Zero-change rule (Δs = 0)", "color": COLOR_NAVY, "x": 5},
+        {"title": "Qualified Challenger Model", "val": "VECM 6-Variable", "sub": "Candidate for 20-day horizon", "color": COLOR_CORAL, "x": 28.5},
+        {"title": "Synchronized Backtest Origins", "val": "741 Trading Days", "sub": "Common calendar evaluation", "color": COLOR_STEEL, "x": 52},
+        {"title": "FDR Multiplicity Threshold", "val": "α = 0.05 (q < 0.05)", "sub": "Benjamini-Hochberg (1995)", "color": COLOR_BRONZE, "x": 75.5}
     ]
 
     for card in cards:
@@ -506,51 +517,51 @@ def generate_figure_10():
             edgecolor=card["color"], facecolor="white", linewidth=1.5
         )
         ax.add_patch(cbox)
-        ax.text(card["x"] + 10, 80, card["title"], fontsize=8.5, color="#64748b", ha="center", fontweight="bold")
+        ax.text(card["x"] + 10, 80, card["title"], fontsize=8.5, color=COLOR_SLATE_MED, ha="center", fontweight="bold")
         ax.text(card["x"] + 10, 76, card["val"], fontsize=11, color=card["color"], ha="center", fontweight="bold")
-        ax.text(card["x"] + 10, 73, card["sub"], fontsize=7.5, color="#94a3b8", ha="center", fontstyle="italic")
+        ax.text(card["x"] + 10, 73, card["sub"], fontsize=7.5, color=COLOR_SLATE_LIGHT, ha="center", fontstyle="italic")
 
     matrix_box = patches.FancyBboxPatch(
         (5, 18), 90, 49,
         boxstyle="round,pad=0.8,rounding_size=1.0",
-        edgecolor="#cbd5e1", facecolor="white", linewidth=1.2
+        edgecolor=COLOR_BORDER, facecolor="white", linewidth=1.2
     )
     ax.add_patch(matrix_box)
 
-    ax.text(8, 63, "Model Governance & Allocation Decision Matrix", fontsize=12, fontweight="bold", color="#0f172a")
-    ax.text(8, 60, "Statistical evidence, operational viability, and production allocation by forecasting paradigm:", fontsize=9, color="#64748b")
+    ax.text(8, 63, "Model Governance & Allocation Decision Matrix", fontsize=12, fontweight="bold", color=COLOR_CHARCOAL)
+    ax.text(8, 60, "Statistical evidence, operational viability, and production allocation by forecasting paradigm:", fontsize=9, color=COLOR_SLATE_MED)
 
     cols = [(8, "Model Paradigm"), (32, "1-Day Horizon"), (48, "5-Day Horizon"), (64, "20-Day Horizon"), (80, "Operational Verdict")]
     for cx, ch in cols:
-        ax.text(cx, 55, ch, fontsize=9.5, fontweight="bold", color="#334155")
-    ax.plot([7, 93], [53.5, 53.5], color="#cbd5e1", linewidth=1.0)
+        ax.text(cx, 55, ch, fontsize=9.5, fontweight="bold", color=COLOR_SLATE_DARK)
+    ax.plot([7, 93], [53.5, 53.5], color=COLOR_BORDER, linewidth=1.0)
 
     rows = [
-        ("Naïve Random Walk (Benchmark)", "Benchmark (RMSE 0.0290)", "Benchmark (RMSE 0.0613)", "Benchmark (RMSE 0.1253)", "RETAIN AS PRIMARY BENCHMARK", "#0284c7"),
-        ("VECM 6-Variable (Johansen r=1)", "CW p=0.369 (q=0.945)", "CW p=0.277 (q=0.462)", "CW p=0.024* (q=0.118)", "PROBATIONARY 20D CHALLENGER", "#10b981"),
-        ("XGBoost Regressor (Tuned)", "CW p=0.945 (q=0.945)", "CW p=0.077 (q=0.193)", "CW p=0.191 (q=0.279)", "RETAIN AS TABULAR ML BENCHMARK", "#8b5cf6"),
-        ("LSTM Neural Network (Tuned)", "CW p=0.918 (q=0.945)", "CW p=0.057 (q=0.193)", "CW p=0.223 (q=0.279)", "DE-PRIORITIZE (EXCESS COMPLEXITY)", "#ec4899"),
-        ("VAR(1) Multivariate AIC", "CW p=0.653 (q=0.945)", "CW p=0.572 (q=0.715)", "CW p=0.180 (q=0.279)", "REJECT (OOS LOSS VS NAÏVE)", "#64748b"),
-        ("ARIMA(2,0,3) Univariate AIC", "CW p=0.483 (q=0.945)", "CW p=0.734 (q=0.734)", "CW p=0.675 (q=0.675)", "REJECT (OPTIMIZER INSTABILITY)", "#f59e0b"),
+        ("Naïve Random Walk (Benchmark)", "Benchmark (RMSE 0.0290)", "Benchmark (RMSE 0.0613)", "Benchmark (RMSE 0.1253)", "RETAIN AS PRIMARY BENCHMARK", COLOR_NAVY),
+        ("VECM 6-Variable (Johansen r=1)", "CW p=0.369 (q=0.945)", "CW p=0.277 (q=0.462)", "CW p=0.024* (q=0.118)", "PROBATIONARY 20D CHALLENGER", COLOR_CORAL),
+        ("XGBoost Regressor (Tuned)", "CW p=0.945 (q=0.945)", "CW p=0.077 (q=0.193)", "CW p=0.191 (q=0.279)", "RETAIN AS TABULAR ML BENCHMARK", COLOR_BRONZE),
+        ("LSTM Neural Network (Tuned)", "CW p=0.918 (q=0.945)", "CW p=0.057 (q=0.193)", "CW p=0.223 (q=0.279)", "DE-PRIORITIZE (EXCESS COMPLEXITY)", COLOR_SLATE_DARK),
+        ("VAR(1) Multivariate AIC", "CW p=0.653 (q=0.945)", "CW p=0.572 (q=0.715)", "CW p=0.180 (q=0.279)", "REJECT (OOS LOSS VS NAÏVE)", COLOR_SLATE_MED),
+        ("ARIMA(2,0,3) Univariate AIC", "CW p=0.483 (q=0.945)", "CW p=0.734 (q=0.734)", "CW p=0.675 (q=0.675)", "REJECT (OPTIMIZER INSTABILITY)", COLOR_SLATE_LIGHT),
     ]
 
     ry = 48.5
     for m_name, h1, h5, h20, verd, vcolor in rows:
-        ax.text(8, ry, m_name, fontsize=8.5, fontweight="bold", color="#1e293b")
-        ax.text(32, ry, h1, fontsize=8.2, color="#475569")
-        ax.text(48, ry, h5, fontsize=8.2, color="#475569")
-        ax.text(64, ry, h20, fontsize=8.2, color="#475569")
+        ax.text(8, ry, m_name, fontsize=8.5, fontweight="bold", color=COLOR_CHARCOAL)
+        ax.text(32, ry, h1, fontsize=8.2, color=COLOR_SLATE_DARK)
+        ax.text(48, ry, h5, fontsize=8.2, color=COLOR_SLATE_DARK)
+        ax.text(64, ry, h20, fontsize=8.2, color=COLOR_SLATE_DARK)
         ax.text(80, ry, verd, fontsize=8.0, fontweight="bold", color=vcolor)
         ry -= 6.0
 
     bot = patches.FancyBboxPatch(
         (5, 5), 90, 10,
         boxstyle="round,pad=0.5,rounding_size=0.8",
-        edgecolor="#10b981", facecolor="#ecfdf5", linewidth=1.2
+        edgecolor=COLOR_NAVY, facecolor=COLOR_BG_LIGHT, linewidth=1.2
     )
     ax.add_patch(bot)
-    ax.text(8, 11.5, "STRATEGIC GOVERNANCE RECOMMENDATION (APA 7 EXECUTIVE DIRECTIVE):", fontsize=9, fontweight="bold", color="#065f46")
-    ax.text(8, 8.0, "Deploy the Naïve Random Walk as the sole operational benchmark for daily risk controls. VECM (6-var) remains a conditional\nchallenger exclusively at the 20-day monthly rebalancing horizon, subject to continued live out-of-sample monitoring.", fontsize=8.2, color="#047857")
+    ax.text(8, 11.5, "STRATEGIC GOVERNANCE RECOMMENDATION (APA 7 EXECUTIVE DIRECTIVE):", fontsize=9, fontweight="bold", color=COLOR_NAVY)
+    ax.text(8, 8.0, "Deploy the Naïve Random Walk as the sole operational benchmark for daily risk controls. VECM (6-var) remains a conditional\nchallenger exclusively at the 20-day monthly rebalancing horizon, subject to continued live out-of-sample monitoring.", fontsize=8.2, color="#334155")
 
     fig.tight_layout()
     out_path = OUT_DIR / "figure_10_executive_dashboard_view.png"
