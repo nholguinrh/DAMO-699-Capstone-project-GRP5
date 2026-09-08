@@ -1,0 +1,78 @@
+flowchart TD
+    subgraph S1 ["1. Institutional Data Ingestion (Bronze Layer)"]
+        A["Bank of Canada (Valet API)<br>Overnight Rate, GoC 2Y-10Y, USD/CAD"]
+        B["Federal Reserve (FRED API)<br>U.S. 10Y Treasury, Fed Funds Rate"]
+        C["Statistics Canada (WDS)<br>Headline CPI (Table 18-10-0004-01)"]
+    end
+
+    subgraph S2 ["2. Data Cleaning & Source Processing (Silver Layer)"]
+        D["Silver Layer: Ingestion validation, schema typing & stitching<br>Bank of Canada, FRED and StatCan individual clean tables"]
+    end
+
+    subgraph S3 ["3. Exploratory Data Analysis & Diagnostics (EDA)"]
+        E["• ADF Stationarity Tests: Proved I(1) levels ⟹ Mandated first-differencing (Δ)<br>• Publication Lag Audit: CPI vintage release-date mapping (no look-ahead bias)<br>• Calendar Audit: Reconciled cross-border holidays (max 2-day forward-fill)"]
+    end
+
+    subgraph S4 ["4. Unified Feature Store (Gold Layer)"]
+        F["Gold Feature Store: 4,268 Daily Observations (2009–2026)<br>Target: 10Y–2Y spread cumulative h-day changes & reconstructed levels<br>Stationarized macro predictors: Δovernight, Δus_treasury, Δfed_funds, Δusdcad, cpi_yoy"]
+    end
+
+    subgraph S5 ["5. Forecasting Paradigms (Naïve Benchmark + 5 Candidate Models)"]
+        G["Naïve Random Walk<br>(Benchmark: Δs = 0)"]
+        H["ARIMA(2,0,3)<br>(Univariate AIC)"]
+        I["VAR(1)<br>(Multivariate AIC)"]
+        J["VECM 6-var<br>(Johansen r=1)"]
+        K["XGBoost Tuned<br>(Tabular ML)"]
+        L["LSTM Tuned<br>(Recurrent Neural Net)"]
+    end
+
+    subgraph S6 ["6. Multi-Horizon Evaluation & Multiplicity Control"]
+        M["Expanding-Window Backtesting: 741 Synchronized Origins (h ∈ {1, 5, 20})<br>Clark-West (2007) Adjusted MSPE Battery (15 Tests)<br>Benjamini-Hochberg (1995) FDR Multiplicity Control (α = 0.05)"]
+    end
+
+    subgraph S7 ["7. Applied Translation & Operational Decision Support"]
+        N["Streamlit Executive Decision-Support Dashboard (streamlit_app.py)"]
+    end
+
+    A --> D
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    F --> H
+    F --> I
+    F --> J
+    F --> K
+    F --> L
+    G --> M
+    H --> M
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M --> N
+
+    style S1 fill:#fffdf0,stroke:#d97706,stroke-width:1.5px
+    style S2 fill:#f0f9ff,stroke:#0284c7,stroke-width:1.5px
+    style S3 fill:#faf5ff,stroke:#9333ea,stroke-width:1.5px
+    style S4 fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px
+    style S5 fill:#f8fafc,stroke:#475569,stroke-width:1.5px
+    style S6 fill:#fef2f2,stroke:#dc2626,stroke-width:1.5px
+    style S7 fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px
+
+    classDef bronze fill:#fef08a,stroke:#ca8a04,stroke-width:1.5px,color:#713f12;
+    classDef silver fill:#bae6fd,stroke:#0284c7,stroke-width:1.5px,color:#075985;
+    classDef eda fill:#e9d5ff,stroke:#9333ea,stroke-width:1.5px,color:#581c87;
+    classDef gold fill:#bbf7d0,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+    classDef models fill:#ffffff,stroke:#475569,stroke-width:1.5px,color:#0f172a;
+    classDef eval fill:#fecaca,stroke:#dc2626,stroke-width:1.5px,color:#7f1d1d;
+    classDef dash fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#1e40af;
+
+    class A,B,C bronze;
+    class D silver;
+    class E eda;
+    class F gold;
+    class G,H,I,J,K,L models;
+    class M eval;
+    class N dash;
