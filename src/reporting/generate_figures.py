@@ -422,7 +422,7 @@ def generate_figure_06():
         ax.grid(axis="y")
         if idx == 0:
             ax.set_ylabel("Hypothesis Test Statistic (p-value / q-value)")
-            ax.legend(loc="upper left", frameon=True, facecolor="white")
+            ax.legend(loc="lower left", frameon=True, facecolor="white")
 
     fig.tight_layout()
     out_path = OUT_DIR / "figure_06_clark_west_significance_3horizons.png"
