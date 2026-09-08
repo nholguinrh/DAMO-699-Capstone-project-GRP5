@@ -13,6 +13,16 @@ import matplotlib.patches as patches
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
 
+try:
+    from IPython.display import Image
+except ImportError:
+    Image = None
+
+def _return_figure(out_path):
+    if Image is not None and Path(out_path).exists():
+        return Image(filename=str(out_path))
+    return out_path
+
 # Academic Scientific Poster Palette (Navy #2D3C50, Terracotta/Coral #E64B3C)
 COLOR_NAVY = "#2d3c50"
 COLOR_CORAL = "#e64b3c"
@@ -60,16 +70,29 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 # ==============================================================================
 # FIGURE 1: END-TO-END DATA & MODELING PIPELINE ARCHITECTURE
 # ==============================================================================
-def generate_figure_01():
+def generate_figure_01(force=False):
     print("Generating Figure 1: Pipeline Architecture via Mermaid CLI...")
     mmd_path = Path("src/reporting/pipeline_diagram.mmd")
     out_path = OUT_DIR / "figure_01_data_pipeline.png"
-    cmd = f'npx -y @mermaid-js/mermaid-cli -i "{mmd_path}" -o "{out_path}" -s 3 -b white'
-    exit_code = os.system(cmd)
-    if exit_code != 0:
-        print(f"Warning: Command failed with exit code {exit_code}")
+    
+    should_build = force or not out_path.exists()
+    if not should_build and mmd_path.exists():
+        if mmd_path.stat().st_mtime > out_path.stat().st_mtime:
+            should_build = True
+
+    if should_build:
+        cmd = f'npx -y @mermaid-js/mermaid-cli -i "{mmd_path}" -o "{out_path}" -s 3 -b white'
+        exit_code = os.system(cmd)
+        if exit_code != 0:
+            print(f"Warning: Command failed with exit code {exit_code}")
+            if out_path.exists():
+                print(f"Using existing figure: {out_path}")
+        else:
+            print(f"Saved: {out_path}")
     else:
-        print(f"Saved: {out_path}")
+        print(f"Figure 1 is up to date: {out_path}")
+
+    return _return_figure(out_path)
 
 
 
@@ -91,7 +114,7 @@ def generate_figure_02():
     axes[0].plot(gold["date"], gold["overnight_rate"], label="BoC Overnight Policy Rate", color=COLOR_CORAL, linewidth=1.3, linestyle=":")
     axes[0].set_ylabel("Annualized Yield (%)")
     axes[0].set_title("(a) Government of Canada Benchmark Yield Curves and Policy Rate (2010–2026)")
-    axes[0].legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#e5e7eb")
+    axes[0].legend(loc="lower right", frameon=True, facecolor="white", edgecolor="#e5e7eb")
     axes[0].grid(True)
 
     # Panel B: Spread & Inversions
@@ -114,6 +137,7 @@ def generate_figure_02():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -149,14 +173,16 @@ def generate_figure_03():
     levels_corr = sub_df.corr()
     diffs_corr = sub_df.diff().dropna().corr()
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7.5), facecolor="white")
+    fig, axes = plt.subplots(1, 2, figsize=(19, 9), facecolor="white")
 
     sns.heatmap(levels_corr, cmap="RdBu_r", center=0, vmin=-1.0, vmax=1.0,
+                annot=True, fmt=".2f", annot_kws={"size": 7.5, "weight": "bold"},
                 ax=axes[0], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[0].set_title("(a) Correlation in Levels (Persistent / Non-Stationary Space)", pad=12)
     axes[0].tick_params(axis='x', rotation=45)
 
     sns.heatmap(diffs_corr, cmap="RdBu_r", center=0, vmin=-1.0, vmax=1.0,
+                annot=True, fmt=".2f", annot_kws={"size": 7.5, "weight": "bold"},
                 ax=axes[1], square=True, cbar_kws={"shrink": 0.82, "label": "Pearson Correlation (r)"})
     axes[1].set_title("(b) Correlation in Stationary First Differences (Short-Run Co-Movement)", pad=12)
     axes[1].tick_params(axis='x', rotation=45)
@@ -166,6 +192,7 @@ def generate_figure_03():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -230,6 +257,7 @@ def generate_figure_04():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -264,6 +292,7 @@ def generate_figure_05():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -322,6 +351,7 @@ def generate_figure_06():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -351,7 +381,7 @@ def generate_figure_07():
     axes[0].set_ylabel("Campbell-Thompson Out-of-Sample R² (%)")
     axes[0].set_title("(a) Unadjusted Out-of-Sample R² (R²_OOS = 1 - MSPE_model / MSPE_naive)")
     axes[0].grid(axis="y")
-    axes[0].legend(loc="lower left", frameon=True, facecolor="white")
+    axes[0].legend(loc="lower right", frameon=True, facecolor="white")
 
     # Panel B: Clark-West Adjusted R²_OOS,adj (percentage)
     for idx, m in enumerate(models):
@@ -371,6 +401,7 @@ def generate_figure_07():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -414,6 +445,7 @@ def generate_figure_08():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -474,6 +506,7 @@ def generate_figure_09():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 # ==============================================================================
@@ -569,6 +602,7 @@ def generate_figure_10():
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
+    return _return_figure(out_path)
 
 
 def main():

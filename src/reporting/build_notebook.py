@@ -64,6 +64,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import seaborn as sns
+from IPython.display import Image, display
 
 # Set working directory to project root if executed from notebooks/05_reporting/
 if Path.cwd().name == "05_reporting":
@@ -207,3 +208,22 @@ with open(out_nb_path, 'w', encoding='utf-8') as f:
     json.dump(nb, f, indent=2)
 
 print('Notebook successfully written to:', out_nb_path)
+
+# Execute notebook so visual exhibits are immediately rendered and visible
+print('Executing notebook to pre-render visual exhibits...')
+try:
+    import nbformat
+    from nbclient import NotebookClient
+
+    with open(out_nb_path, 'r', encoding='utf-8') as f:
+        nb_obj = nbformat.read(f, as_version=4)
+
+    client = NotebookClient(nb_obj, timeout=120, kernel_name='python3')
+    client.execute()
+
+    with open(out_nb_path, 'w', encoding='utf-8') as f:
+        nbformat.write(nb_obj, f)
+
+    print('Notebook successfully executed and all 10 visual exhibits pre-rendered!')
+except Exception as e:
+    print(f'Warning: Could not pre-render notebook exhibits automatically: {e}')
