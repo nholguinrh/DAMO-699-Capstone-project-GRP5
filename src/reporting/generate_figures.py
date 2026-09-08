@@ -198,57 +198,135 @@ def generate_figure_03():
 # ==============================================================================
 # FIGURE 4: OUT-OF-SAMPLE PREDICTIVE ACCURACY (RMSE & MAE)
 # ==============================================================================
+def load_oos_metrics():
+    """
+    Dynamically loads and computes out-of-sample RMSE and MAE across all candidate
+    models and the Naïve benchmark on the synchronized common evaluation sample (745 origins).
+
+    Returns:
+        (rmse_dict, mae_dict) where each maps model display name to a list of floats
+        corresponding to horizons [1, 5, 20].
+    """
+    cw_path = Path("outputs/clark_west_test_results.csv")
+    if cw_path.exists():
+        cw = pd.read_csv(cw_path)
+        if "mae_model" in cw.columns and "mae_naive" in cw.columns:
+            horizons = [1, 5, 20]
+            models = ["ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
+            rmse_dict = {
+                "Naïve Random Walk": [float(np.sqrt(cw[cw["horizon"] == h]["mspe_naive"].iloc[0])) for h in horizons]
+            }
+            mae_dict = {
+                "Naïve Random Walk": [float(cw[cw["horizon"] == h]["mae_naive"].iloc[0]) for h in horizons]
+            }
+            for m in models:
+                rmse_dict[m] = [float(np.sqrt(cw[(cw["horizon"] == h) & (cw["model"] == m)]["mspe_model"].iloc[0])) for h in horizons]
+                mae_dict[m] = [float(cw[(cw["horizon"] == h) & (cw["model"] == m)]["mae_model"].iloc[0]) for h in horizons]
+            return rmse_dict, mae_dict
+
+    # Compute dynamically from canonical forecast files on synchronized common sample
+    arima = pd.read_csv("outputs/r3_arima_forecasts.csv")
+    var_aic = pd.read_csv("outputs/r3_patha_var_aic_forecasts.csv")
+    vecm = pd.read_csv("outputs/r3_vecm_6var_forecasts.csv")
+    lstm = pd.read_csv("outputs/r3_lstm_forecasts.csv")
+    xgb = pd.read_csv("outputs/r3_xgboost_forecasts.csv")
+
+    common = (
+        set(arima["origin_date"])
+        & set(var_aic["origin_date"])
+        & set(vecm["origin_date"])
+        & set(lstm["origin_date"])
+        & set(xgb["origin_date"])
+    )
+
+    model_sources = {
+        "Naïve Random Walk": (arima[arima["origin_date"].isin(common)], "naive"),
+        "ARIMA-AIC": (arima[arima["origin_date"].isin(common)], "arima_aic"),
+        "VAR-AIC": (var_aic[var_aic["origin_date"].isin(common)], "var_aic"),
+        "VECM (6-var)": (vecm[vecm["origin_date"].isin(common)], "vecm"),
+        "XGBoost (Tuned)": (xgb[xgb["origin_date"].isin(common)], "xgboost"),
+        "LSTM (Tuned)": (lstm[lstm["origin_date"].isin(common)], "lstm"),
+    }
+
+    horizons = [1, 5, 20]
+    rmse_dict = {}
+    mae_dict = {}
+    summary_records = []
+
+    for m_name, (df_sub, col) in model_sources.items():
+        rmse_dict[m_name] = []
+        mae_dict[m_name] = []
+        for h in horizons:
+            sub = df_sub[df_sub["horizon"] == h]
+            err = (sub["actual"] - sub[col]).to_numpy()
+            mae_val = float(np.mean(np.abs(err)))
+            rmse_val = float(np.sqrt(np.mean(err**2)))
+            mae_dict[m_name].append(mae_val)
+            rmse_dict[m_name].append(rmse_val)
+            summary_records.append({
+                "model": m_name,
+                "horizon": h,
+                "rmse": round(rmse_val, 5),
+                "mae": round(mae_val, 5)
+            })
+
+    # Cache summary CSV
+    summary_df = pd.DataFrame(summary_records)
+    summary_path = Path("outputs/r3_oos_rmse_mae_summary.csv")
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_df.to_csv(summary_path, index=False)
+
+    return rmse_dict, mae_dict
+
+
 def generate_figure_04():
     print("Generating Figure 4: RMSE and MAE Comparison Across Horizons...")
-    cw = pd.read_csv("outputs/clark_west_test_results.csv")
-    
-    # Extract RMSE and MAE for all models
-    cw["rmse_model"] = np.sqrt(cw["mspe_model"])
-    cw["rmse_naive"] = np.sqrt(cw["mspe_naive"])
-    
+    rmse_dict, mae_dict = load_oos_metrics()
+
     horizons = [1, 5, 20]
-    models = ["ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
+    all_models = ["Naïve Random Walk", "ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
     model_colors = MODEL_PALETTE
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor="white")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor="white")
 
-    # Data structuring
     x = np.arange(len(horizons))
     width = 0.13
 
-    # Plot RMSE
-    naive_rmse = [np.sqrt(cw[cw["horizon"] == h]["mspe_naive"].iloc[0]) for h in horizons]
-    axes[0].bar(x - 2.5*width, naive_rmse, width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.95)
-
-    for idx, m in enumerate(models):
-        m_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["rmse_model"].iloc[0] for h in horizons]
-        axes[0].bar(x - 1.5*width + idx*width, m_vals, width, label=m, color=model_colors[m], alpha=0.95)
+    # (a) Out-of-Sample RMSE Across Horizons
+    for idx, m in enumerate(all_models):
+        pos = x - 2.5 * width + idx * width
+        bars = axes[0].bar(
+            pos, rmse_dict[m], width,
+            label=m, color=model_colors[m], alpha=0.95,
+            edgecolor="#333333", linewidth=0.5
+        )
+        axes[0].bar_label(bars, fmt="%.4f", padding=3, fontsize=7.5, rotation=45)
 
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
+    axes[0].set_xlabel("Forecast Horizon")
     axes[0].set_ylabel("Root Mean Squared Error (RMSE in Spread Units)")
     axes[0].set_title("(a) Out-of-Sample RMSE Across Horizons (Reconstructed Spread Levels)")
+    axes[0].set_ylim(0, 0.155)
     axes[0].grid(axis="y")
     axes[0].legend(loc="upper left", frameon=True, facecolor="white")
 
-    # Plot MAE
-    mae_dict = {
-        "Naïve Random Walk": [0.0210, 0.0465, 0.0985],
-        "ARIMA-AIC": [0.0211, 0.0471, 0.1012],
-        "VAR-AIC": [0.0214, 0.0475, 0.0991],
-        "VECM (6-var)": [0.0212, 0.0472, 0.0970],
-        "XGBoost (Tuned)": [0.0218, 0.0478, 0.1018],
-        "LSTM (Tuned)": [0.0212, 0.0469, 0.0998]
-    }
-
-    axes[1].bar(x - 2.5*width, mae_dict["Naïve Random Walk"], width, label="Naïve Random Walk", color=model_colors["Naïve Random Walk"], alpha=0.95)
-    for idx, m in enumerate(models):
-        axes[1].bar(x - 1.5*width + idx*width, mae_dict[m], width, label=m, color=model_colors[m], alpha=0.95)
+    # (b) Out-of-Sample MAE Across Horizons
+    for idx, m in enumerate(all_models):
+        pos = x - 2.5 * width + idx * width
+        bars = axes[1].bar(
+            pos, mae_dict[m], width,
+            label=m, color=model_colors[m], alpha=0.95,
+            edgecolor="#333333", linewidth=0.5
+        )
+        axes[1].bar_label(bars, fmt="%.4f", padding=3, fontsize=7.5, rotation=45)
 
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
+    axes[1].set_xlabel("Forecast Horizon")
     axes[1].set_ylabel("Mean Absolute Error (MAE in Spread Units)")
     axes[1].set_title("(b) Out-of-Sample MAE Across Horizons")
+    axes[1].set_ylim(0, 0.120)
     axes[1].grid(axis="y")
     axes[1].legend(loc="upper left", frameon=True, facecolor="white")
 
@@ -365,7 +443,7 @@ def generate_figure_07():
     models = ["ARIMA-AIC", "VAR-AIC", "VECM (6-var)", "XGBoost (Tuned)", "LSTM (Tuned)"]
     model_colors = MODEL_PALETTE
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor="white")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), facecolor="white")
 
     x = np.arange(len(horizons))
     width = 0.15
@@ -373,26 +451,40 @@ def generate_figure_07():
     # Panel A: Unadjusted Campbell-Thompson R²_OOS (percentage)
     for idx, m in enumerate(models):
         r2_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos"].iloc[0] * 100 for h in horizons]
-        axes[0].bar(x - 2*width + idx*width, r2_vals, width, label=m, color=model_colors[m], alpha=0.95, edgecolor="#333333", linewidth=0.7)
+        bars = axes[0].bar(
+            x - 2*width + idx*width, r2_vals, width,
+            label=m, color=model_colors[m], alpha=0.95,
+            edgecolor="#333333", linewidth=0.7
+        )
+        axes[0].bar_label(bars, fmt="%.1f%%", padding=3, fontsize=7, rotation=45)
 
     axes[0].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
+    axes[0].set_xlabel("Forecast Horizon")
     axes[0].set_ylabel("Campbell-Thompson Out-of-Sample R² (%)")
     axes[0].set_title("(a) Unadjusted Out-of-Sample R² (R²_OOS = 1 - MSPE_model / MSPE_naive)")
+    axes[0].set_ylim(-11, 4)
     axes[0].grid(axis="y")
     axes[0].legend(loc="lower right", frameon=True, facecolor="white")
 
     # Panel B: Clark-West Adjusted R²_OOS,adj (percentage)
     for idx, m in enumerate(models):
         r2_adj_vals = [cw[(cw["horizon"] == h) & (cw["model"] == m)]["r2_oos_adj"].iloc[0] * 100 for h in horizons]
-        axes[1].bar(x - 2*width + idx*width, r2_adj_vals, width, label=m, color=model_colors[m], alpha=0.95, edgecolor="#333333", linewidth=0.7)
+        bars = axes[1].bar(
+            x - 2*width + idx*width, r2_adj_vals, width,
+            label=m, color=model_colors[m], alpha=0.95,
+            edgecolor="#333333", linewidth=0.7
+        )
+        axes[1].bar_label(bars, fmt="%.1f%%", padding=3, fontsize=7, rotation=45)
 
     axes[1].axhline(0, color=COLOR_CHARCOAL, linestyle="-", linewidth=1.2)
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(["1-Day Horizon", "5-Day Horizon", "20-Day Horizon"])
+    axes[1].set_xlabel("Forecast Horizon")
     axes[1].set_ylabel("Clark-West Adjusted Out-of-Sample R² (%)")
     axes[1].set_title("(b) Clark-West Parameter-Noise Adjusted R² (R²_OOS,adj)")
+    axes[1].set_ylim(-6, 17)
     axes[1].grid(axis="y")
     axes[1].legend(loc="upper left", frameon=True, facecolor="white")
 
@@ -418,7 +510,15 @@ def generate_figure_08():
         "d_fed_funds_rate": "Δ Federal Funds Effective Rate",
         "d_overnight_rate": "Δ BoC Target Overnight Rate",
         "d_usdcad": "Δ USD/CAD Spot Exchange Rate",
-        "d_cpi_yoy": "Δ CPI YoY Headline Inflation"
+        "d_cpi_yoy": "Δ CPI YoY Headline Inflation",
+        "vol_target_20d": "20-Day Spread Realized Volatility",
+        "vol_ust_20d": "20-Day U.S. 10Y Realized Volatility",
+        "mom_target_20d": "20-Day Spread Momentum",
+        "vol_ust_5d": "5-Day U.S. 10Y Realized Volatility",
+        "vol_overnight_20d": "20-Day BoC Rate Realized Volatility",
+        "d_us_treasury_10y_lag3": "Δ U.S. 10Y Treasury (Lag 3)",
+        "d_us_treasury_10y_lag4": "Δ U.S. 10Y Treasury (Lag 4)",
+        "d_us_treasury_10y_lag2": "Δ U.S. 10Y Treasury (Lag 2)",
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor="white")
@@ -426,18 +526,22 @@ def generate_figure_08():
     # Panel A: LSTM Global SHAP
     lstm_sorted = lstm_shap.sort_values("mean_abs_shap", ascending=True)
     clean_lstm_labels = [feature_labels.get(f, f) for f in lstm_sorted["feature"]]
-    axes[0].barh(clean_lstm_labels, lstm_sorted["mean_abs_shap"], color=COLOR_CORAL, alpha=0.9, edgecolor="#b91c1c")
+    rects0 = axes[0].barh(clean_lstm_labels, lstm_sorted["mean_abs_shap"], color=COLOR_CORAL, alpha=0.9, edgecolor="#b91c1c")
+    axes[0].bar_label(rects0, fmt="%.4f", padding=4, fontsize=8)
     axes[0].set_xlabel("Mean Absolute SHAP Value (Predictive Attribution)")
     axes[0].set_title("(a) LSTM Recurrent Neural Network: Global Feature Attribution (1-Day Ahead)")
+    axes[0].set_xlim(0, lstm_sorted["mean_abs_shap"].max() * 1.15)
     axes[0].grid(axis="x")
 
     # Panel B: XGBoost Top Features (Horizon 20d)
     xgb_20 = xgb_shap[xgb_shap["horizon"] == 20].sort_values("mean_abs_shap", ascending=False).head(8)
     xgb_sorted = xgb_20.sort_values("mean_abs_shap", ascending=True)
     clean_xgb_labels = [feature_labels.get(f, f.replace("d_", "Δ ").replace("_", " ")) for f in xgb_sorted["feature"]]
-    axes[1].barh(clean_xgb_labels, xgb_sorted["mean_abs_shap"], color=COLOR_NAVY, alpha=0.9, edgecolor=COLOR_CHARCOAL)
+    rects1 = axes[1].barh(clean_xgb_labels, xgb_sorted["mean_abs_shap"], color=COLOR_NAVY, alpha=0.9, edgecolor=COLOR_CHARCOAL)
+    axes[1].bar_label(rects1, fmt="%.4f", padding=4, fontsize=8)
     axes[1].set_xlabel("Mean Absolute SHAP Value (Predictive Attribution)")
     axes[1].set_title("(b) XGBoost Regressor: Top Predictor Attribution (20-Day Horizon)")
+    axes[1].set_xlim(0, xgb_sorted["mean_abs_shap"].max() * 1.15)
     axes[1].grid(axis="x")
 
     fig.tight_layout()
