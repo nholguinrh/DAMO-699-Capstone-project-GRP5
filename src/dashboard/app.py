@@ -39,7 +39,6 @@ from data_loader import (
     load_regime_metrics,
     load_shap_summary,
     load_xgboost_shap_summary,
-    get_conformal_disclosure,
     min_covered_origins,
     origin_window_label,
     window_model_coverage,
@@ -131,13 +130,6 @@ selected_models = st.sidebar.multiselect(
         "LSTM",
         XGB_DISPLAY_LABEL,
     ],
-)
-
-uncertainty_interval = st.sidebar.radio(
-    f"{XGB_DISPLAY_LABEL} Uncertainty Ribbon",
-    options=["None", "90%", "95%"],
-    horizontal=True,
-    help=get_conformal_disclosure(),
 )
 
 st.sidebar.divider()
@@ -778,9 +770,6 @@ with tab_performance:
             horizon_window_df,
             horizon=horizon,
             selected_models=_plot_models,
-            uncertainty_interval=(
-                uncertainty_interval if "XGBoost" in _plot_models else "None"
-            ),
             window_label=origin_window_label(horizon_window_df),
         )
 
