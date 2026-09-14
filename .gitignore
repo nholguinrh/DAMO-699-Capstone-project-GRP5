@@ -23,8 +23,6 @@ data/raw/*
 # repo, so they're exempt from the data/raw ignore above.
 !data/raw/statcan/
 !data/raw/statcan/cpi_*.json
-data/processed/*
-!data/processed/.gitkeep
 
 # Dashboard pipeline-trigger run summary (per-run, machine-local)
 outputs/pipeline_run_status.json
