@@ -1,0 +1,46 @@
+flowchart TD
+    subgraph S1 ["1. Institutional Data Ingestion (Bronze Layer)"]
+        A["Bank of Canada (Valet API)<br>Overnight Rate, GoC 2Y–10Y Yields, USD/CAD"] ~~~ B["Federal Reserve (FRED API)<br>U.S. 10Y Treasury (DGS10), Fed Funds (DFF)"] ~~~ C["Statistics Canada (WDS)<br>Headline CPI (Table 18-10-0004-01)"]
+    end
+
+    subgraph S2 ["2. Data Cleaning & Source Processing (Silver Layer)"]
+        D["<div style='width:800px;'><b>Silver Layer:</b> Ingestion validation, schema typing & multi-source stitching<br>Harmonized clean daily tables for Bank of Canada, Federal Reserve (FRED) and Statistics Canada</div>"]
+    end
+
+    subgraph S3 ["3. Exploratory Data Analysis & Diagnostics (EDA)"]
+        E["<div style='width:800px; text-align:left;'>• <b>ADF Stationarity Tests:</b> Proved I(1) non-stationarity in levels ⟹ Mandated first-differencing (Δ)<br>• <b>Publication Lag Audit:</b> Mapped real-time CPI release-date vintages (eliminating look-ahead bias)<br>• <b>Calendar Harmonization:</b> Reconciled cross-border holiday mismatches (max 2-day forward-fill)</div>"]
+    end
+
+    subgraph S4 ["4. Unified Feature Store (Gold Layer)"]
+        F["<div style='width:800px;'><b>Gold Feature Store:</b> 4,268 Daily Observations (2009–2026)<br><b>Target:</b> Canadian 10Y–2Y spread cumulative h-day changes (Δs) & reconstructed levels<br><b>Stationarized macro predictors:</b> Δovernight, Δus_treasury, Δfed_funds, Δusdcad, cpi_yoy</div>"]
+    end
+
+    subgraph S5 ["5. Forecasting Paradigms (Naïve Benchmark + 5 Candidate Models)"]
+        G["Naïve Random Walk<br>(Zero-Change)"] ~~~ H["ARIMA(2,0,3)<br>AIC"] ~~~ I["VAR(1)<br>AIC"] ~~~ J["VECM 6-var<br>(Johansen r=1)"] ~~~ K["XGBoost<br>Tuned"] ~~~ L["LSTM Tuned<br>(lookback=20d)"]
+    end
+
+    subgraph S6 ["6. Multi-Horizon Evaluation & Multiplicity Control"]
+        M["<div style='width:800px;'><b>Expanding-Window Backtesting:</b> 741 Synchronized Origins across horizons h ∈ {1, 5, 20} days<br><b>Clark-West (2007) Adjusted MSPE Test Battery:</b> 15 Hypotheses for nested models<br><b>Benjamini-Hochberg (1995) FDR Multiplicity Control:</b> Controlled at false discovery rate α = 0.05</div>"]
+    end
+
+    subgraph S7 ["7. Applied Translation & Operational Decision Support"]
+        N["<div style='width:800px;'><b>Streamlit Executive Decision-Support Dashboard (streamlit_app.py)</b><br>Interactive real-time slope regime detection, multi-model consensus & institutional risk alerts</div>"]
+    end
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
+
+    style S1 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S2 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S3 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S4 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S5 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S6 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+    style S7 fill:#f8fafc,stroke:#2d3c50,stroke-width:1.5px
+
+    classDef defaultNode fill:#ffffff,stroke:#2d3c50,stroke-width:1.2px,color:#1e293b;
+    classDef accentNode fill:#ffffff,stroke:#2d3c50,stroke-width:1.2px,color:#1e293b;
+    classDef darkNode fill:#2d3c50,stroke:#1e293b,stroke-width:1.2px,color:#ffffff;
+
+    class A,B,C,D,F,G,H,I,J,K,L defaultNode;
+    class E,M accentNode;
+    class N darkNode;
